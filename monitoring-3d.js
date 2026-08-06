@@ -12,6 +12,51 @@ const enterprisePoints = [
 const colors = { high: 0xf04444, medium: 0xf4a62a, low: 0x2bbd86, unrated: 0x6f8391 };
 let disposeScene = () => {};
 
+// deterministic pseudo-random so screenshots stay reproducible
+const seeded = (seed) => {
+  let value = seed;
+  return () => {
+    value = (value * 16807) % 2147483647;
+    return (value - 1) / 2147483646;
+  };
+};
+
+const makeFacadeTexture = (baseColor, litRatio, seed) => {
+  const rand = seeded(seed);
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, 64, 128);
+  for (let y = 7; y < 122; y += 11) {
+    for (let x = 6; x < 58; x += 10) {
+      const lit = rand() < litRatio;
+      ctx.fillStyle = lit ? "rgba(255, 214, 150, 0.92)" : "rgba(126, 176, 205, 0.22)";
+      ctx.fillRect(x, y, 6, 7);
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+};
+
+const makeGlowTexture = () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  gradient.addColorStop(0, "rgba(255,255,255,0.9)");
+  gradient.addColorStop(0.4, "rgba(255,255,255,0.25)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+};
+
 function buildScene() {
   disposeScene();
   const host = document.querySelector("#monitoring-3d");
@@ -39,13 +84,23 @@ function buildScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  renderer.toneMappingExposure = 1.22;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.className = "twin-canvas";
   host.prepend(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0x8fb7cf, 0x071018, 1.6));
+  scene.add(new THREE.HemisphereLight(0x9cc3d9, 0x0a141c, 1.9));
   const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
   keyLight.position.set(8, 14, 9);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(1024, 1024);
+  keyLight.shadow.camera.left = -12;
+  keyLight.shadow.camera.right = 12;
+  keyLight.shadow.camera.top = 12;
+  keyLight.shadow.camera.bottom = -12;
+  keyLight.shadow.camera.far = 45;
+  keyLight.shadow.bias = -0.0004;
   scene.add(keyLight);
 
   const ground = new THREE.Mesh(
@@ -53,6 +108,7 @@ function buildScene() {
     new THREE.MeshStandardMaterial({ color: 0x0a1821, roughness: 0.9, metalness: 0.1 }),
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
   scene.add(ground);
   const grid = new THREE.GridHelper(22, 22, 0x31505f, 0x172b36);
   grid.position.y = 0.012;
@@ -67,10 +123,21 @@ function buildScene() {
     [5.5, 2.0, 1.5, 1.1, 1.7], [-5.9, 4.3, 1.4, 1.2, 0.9], [-3.5, 4.4, 1.8, 1.1, 1.2],
     [-0.8, 4.2, 1.2, 1.5, 1.8], [2.0, 4.1, 1.6, 1.3, 1.0], [4.9, 4.2, 1.3, 1.6, 1.4],
   ];
-  const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x18303d, roughness: 0.72, metalness: 0.28 });
-  buildings.forEach(([x, z, w, d, h]) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), buildingMaterial);
+  const facadeVariants = [
+    { base: "#22404f", lit: 0.34 },
+    { base: "#1a3040", lit: 0.24 },
+    { base: "#29495a", lit: 0.44 },
+  ].map(({ base, lit }, index) => new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: makeFacadeTexture(base, lit, 97 + index * 13),
+    roughness: 0.68,
+    metalness: 0.24,
+  }));
+  buildings.forEach(([x, z, w, d, h], index) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), facadeVariants[index % facadeVariants.length]);
     mesh.position.set(x, h / 2, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     scene.add(mesh);
   });
 
@@ -78,6 +145,8 @@ function buildScene() {
   const selectedId = host.dataset.selectedCompany;
   const riskLevels = Object.fromEntries((host.dataset.riskLevels || "").split(",").filter(Boolean).map((item) => item.split(":")));
   let selectedRing;
+  const glowTexture = makeGlowTexture();
+  const towerPulses = [];
   enterprisePoints.forEach((point) => {
     const level = colors[riskLevels[point.id]] ? riskLevels[point.id] : "unrated";
     const color = colors[level];
@@ -86,9 +155,19 @@ function buildScene() {
     const material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: selected ? 0.8 : 0.28, roughness: 0.38 });
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.34, height, 18), material);
     tower.position.set(point.x, height / 2 + 0.08, point.z);
+    tower.castShadow = true;
     tower.userData.enterpriseId = point.id;
     scene.add(tower);
     interactive.push(tower);
+    towerPulses.push({ material, base: selected ? 0.8 : 0.28, selected });
+
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture, color, transparent: true, opacity: selected ? 0.75 : 0.4,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    glow.scale.setScalar(selected ? 2.0 : 1.35);
+    glow.position.set(point.x, height + 0.3, point.z);
+    scene.add(glow);
 
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(selected ? 0.72 : 0.48, selected ? 0.045 : 0.025, 8, 40),
@@ -152,7 +231,13 @@ function buildScene() {
   host.querySelector(".twin-loading")?.remove();
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   renderer.setAnimationLoop((time) => {
-    if (selectedRing && !reduceMotion) selectedRing.scale.setScalar(1 + Math.sin(time * 0.003) * 0.08);
+    if (!reduceMotion) {
+      if (selectedRing) selectedRing.scale.setScalar(1 + Math.sin(time * 0.003) * 0.08);
+      towerPulses.forEach(({ material, base, selected }, index) => {
+        const wave = Math.sin(time * 0.002 + index * 1.3) * (selected ? 0.25 : 0.1);
+        material.emissiveIntensity = base + wave;
+      });
+    }
     controls.update();
     renderer.render(scene, camera);
   });
