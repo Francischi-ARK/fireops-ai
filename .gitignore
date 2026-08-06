@@ -7,6 +7,7 @@ node_modules/
 *.log
 .codex/
 # test-script screenshot outputs (regenerable)
+preview.png
 implementation-1440x1024.png
 workspaces-1440x1024.png
 copilot-e2e.png

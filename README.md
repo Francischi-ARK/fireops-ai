@@ -16,7 +16,7 @@ Agent 完成任务理解、缺项追问、证据检索与步骤规划，核实�
 
 | 桌面指挥台 | 手机现场确认 |
 | --- | --- |
-| ![桌面端 Copilot 工作台](preview.png) | ![手机端人工确认链](copilot-mobile-390x844.png) |
+| ![桌面端 Copilot 工作台](docs/images/copilot-desktop.png) | ![手机端人工确认链](copilot-mobile-390x844.png) |
 
 ## 快速开始
 
