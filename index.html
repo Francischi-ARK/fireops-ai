@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="FireGuard AI 消防智能化业务平台" />
+    <title>FireGuard AI｜消防智能化业务平台</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23de2f32'/></svg>" />
+    <link rel="stylesheet" href="styles.css?v=1.3" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./assets/three.module.min.js",
+          "three/addons/": "./assets/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <header class="app-header">
+      <a class="brand" href="#/home" aria-label="FireGuard AI 首页">
+        <span class="brand-shield" aria-hidden="true"><i data-lucide="shield"></i></span>
+        <span><strong>FireGuard AI</strong><small>消防智能化业务平台</small></span>
+      </a>
+
+      <nav class="primary-nav" aria-label="产品导航">
+        <a href="#/home" data-top-nav="home">工作台</a>
+        <a href="#/monitoring" data-top-nav="monitoring">重点单位监测</a>
+        <a href="#/incidents" data-top-nav="incidents">接处警</a>
+        <a href="#/station" data-top-nav="station">救援站</a>
+        <a href="#/inspections" data-top-nav="inspections">监督检查</a>
+        <a href="#/enterprises/ent-001" data-top-nav="enterprises">企业管理</a>
+      </nav>
+
+      <div class="header-meta">
+        <button class="header-import" type="button" data-action="import-data" hidden><i data-lucide="file-up"></i>数据导入</button>
+        <button class="account" type="button"><i data-lucide="circle-user-round"></i>演示角色<i data-lucide="chevron-down"></i></button>
+      </div>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+      <div id="app"></div>
+    </main>
+
+    <nav class="mobile-nav" aria-label="手机端主要导航">
+      <a href="#/home" data-mobile-nav="home"><i data-lucide="layout-grid"></i><span>首页</span></a>
+      <a href="#/copilot" data-mobile-nav="copilot"><i data-lucide="bot"></i><span>Copilot</span></a>
+      <a href="#/incidents" data-mobile-nav="incidents"><i data-lucide="radio-tower"></i><span>指挥</span></a>
+      <a href="#/station" data-mobile-nav="station"><i data-lucide="siren"></i><span>站端</span></a>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <dialog id="import-dialog" class="app-dialog">
+      <form method="dialog" class="dialog-card">
+        <header><div><span>DEMO DATA</span><h2>导入消防数据包</h2></div><button value="cancel" aria-label="关闭"><i data-lucide="x"></i></button></header>
+        <p>请选择 `demo-data` 目录内的 5 个 CSV。系统会校验文件、字段、时间、企业归属和潜在公式，然后执行 FG-DEMO-v0 评分。</p>
+        <label class="file-drop" for="csv-files"><i data-lucide="files"></i><strong>选择 5 个 CSV 文件</strong><span>单文件不超过 1 MB，最多 500 行</span><input id="csv-files" type="file" accept=".csv,text/csv" multiple /></label>
+        <div id="import-file-list" class="import-file-list">尚未选择文件</div>
+        <div id="import-result" class="import-result" aria-live="polite"></div>
+        <footer><button value="cancel" class="dialog-secondary">取消</button><button id="run-import" value="default" type="button" class="primary-action" disabled>校验并评分</button></footer>
+      </form>
+    </dialog>
+
+    <dialog id="evidence-dialog" class="app-dialog evidence-dialog">
+      <div class="dialog-card">
+        <header><div><span>EVIDENCE</span><h2 id="evidence-title">隐患证据</h2></div><button type="button" data-dialog-close="evidence-dialog" aria-label="关闭"><i data-lucide="x"></i></button></header>
+        <img id="evidence-image" alt="" />
+        <p id="evidence-caption"></p>
+      </div>
+    </dialog>
+
+    <dialog id="workflow-dialog" class="app-dialog workflow-dialog">
+      <div class="dialog-card">
+        <header><div><span>RECTIFICATION</span><h2 id="workflow-title">隐患闭环时间线</h2></div><button type="button" data-dialog-close="workflow-dialog" aria-label="关闭"><i data-lucide="x"></i></button></header>
+        <div id="workflow-summary" class="workflow-summary"></div>
+        <ol id="workflow-timeline" class="workflow-timeline"></ol>
+        <footer><button type="button" data-dialog-close="workflow-dialog" class="dialog-secondary">关闭</button><button id="start-reinspection" type="button" class="primary-action">发起专项复查</button></footer>
+      </div>
+    </dialog>
+
+    <script src="assets/lucide.min.js"></script>
+    <script src="engine.cjs?v=1.1"></script>
+    <script src="app.js?v=1.5"></script>
+    <script type="module" src="monitoring-3d.js?v=1.1"></script>
+  </body>
+</html>

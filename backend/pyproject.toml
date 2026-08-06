@@ -1,0 +1,16 @@
+[project]
+name = "fireguard-backend"
+version = "0.1.0"
+description = "FireGuard AI重点单位监测后端"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "psycopg[binary]>=3.2,<4",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[dependency-groups]
+dev = ["httpx>=0.28,<1"]
+
+[tool.uv]
+package = false

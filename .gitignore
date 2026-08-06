@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.env
+*.log
+.codex/
+# test-script screenshot outputs (regenerable)
+implementation-1440x1024.png
+workspaces-1440x1024.png
+copilot-e2e.png
+page@*.webm
