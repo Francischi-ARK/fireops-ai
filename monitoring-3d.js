@@ -188,7 +188,7 @@ function buildScene() {
     const selected = point.id === selectedId;
     const height = level === "high" ? 2.6 : level === "medium" ? 2.0 : 1.55;
     const material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: selected ? 0.8 : 0.28, roughness: 0.38 });
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.34, height, 18), material);
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.2, height, 18), material);
     tower.position.set(point.x, height / 2 + 0.08, point.z);
     tower.castShadow = true;
     tower.userData.enterpriseId = point.id;
@@ -200,7 +200,7 @@ function buildScene() {
       map: glowTexture, color, transparent: true, opacity: selected ? 0.75 : 0.4,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    glow.scale.setScalar(selected ? 2.0 : 1.35);
+    glow.scale.setScalar(selected ? 1.7 : 1.15);
     glow.position.set(point.x, height + 0.3, point.z);
     scene.add(glow);
 

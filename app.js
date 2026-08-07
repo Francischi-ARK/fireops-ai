@@ -472,7 +472,7 @@ function monitoringTemplate() {
         <section class="twin-panel" aria-labelledby="twin-title">
           <header><div><span>DIGITAL TWIN / SYNTHETIC DATA</span><h2 id="twin-title">辖区三维消防态势</h2></div><div class="twin-actions"><button type="button" data-action="inject-demo-event"><i data-lucide="radio-tower"></i>模拟设备火警</button><button type="button" data-3d-view="top"><i data-lucide="map"></i>俯视</button><button type="button" data-3d-view="reset"><i data-lucide="rotate-ccw"></i>复位</button></div></header>
           <div id="monitoring-3d" class="twin-viewport" data-selected-company="${company.id}" data-risk-levels="${queueCompanies.map((item) => `${item.id}:${item.level}`).join(",")}" role="img" aria-label="可旋转的辖区建筑群与重点单位消防风险三维视图">
-            <div class="twin-loading"><span></span>正在加载三维态势</div>
+            <div class="twin-loading"><span></span>${location.protocol === "file:" ? "直接双击打开无法加载三维场景：请在项目目录运行 python3 -m http.server 4173 后访问 http://127.0.0.1:4173/（或双击 start-demo.command）" : "正在加载三维态势"}</div>
             <div class="twin-overlay twin-legend"><span><b class="risk-dot high"></b>高风险</span><span><b class="risk-dot medium"></b>中风险</span><span><b class="risk-dot low"></b>低风险</span><span><b class="risk-dot unrated"></b>数据不足</span></div>
             <div class="twin-overlay twin-hint"><i data-lucide="mouse-pointer-2"></i>拖动旋转 · 滚轮缩放 · 点击风险柱</div>
           </div>
