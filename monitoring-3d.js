@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/OrbitControls.js";
+import { GLTFLoader } from "three/addons/GLTFLoader.js";
 
 const enterprisePoints = [
   { id: "ent-001", x: 3.2, z: -1.8 },
@@ -76,7 +77,7 @@ function buildScene() {
   scene.fog = new THREE.FogExp2(0x071018, 0.042);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
   const resetView = () => {
-    camera.position.set(10, 11, 13);
+    camera.position.set(8.6, 8.2, 10.8);
     camera.lookAt(0, 0, 0);
   };
   resetView();
@@ -114,14 +115,14 @@ function buildScene() {
   grid.position.y = 0.012;
   scene.add(grid);
 
+  // [x, z, archetype 0=厂房 1=办公楼 2=仓库, scale, quarterTurns]
+  // 围绕三类 Blender 资产的真实比例手工排布的园区布局，
+  // 并避开 enterprisePoints 的风险塔位置
   const buildings = [
-    [-6.4, -4.1, 1.4, 1.8, 1.0], [-4.5, -4.0, 1.1, 1.3, 1.8], [-2.8, -4.2, 1.6, 1.2, 0.8],
-    [0.0, -4.0, 1.3, 1.6, 1.2], [2.0, -4.1, 1.1, 1.4, 2.0], [5.2, -4.0, 1.8, 1.2, 1.1],
-    [-6.2, -1.4, 1.6, 1.2, 1.5], [-3.2, -1.0, 1.2, 1.8, 1.0], [-0.7, -1.8, 1.8, 1.0, 1.4],
-    [2.3, -1.0, 1.4, 1.7, 1.8], [5.8, -1.1, 1.1, 1.5, 0.9], [-5.1, 1.6, 1.4, 1.4, 1.0],
-    [-2.8, 2.0, 1.0, 1.8, 1.6], [0.2, 2.1, 1.6, 1.1, 0.9], [2.7, 1.9, 1.3, 1.7, 1.3],
-    [5.5, 2.0, 1.5, 1.1, 1.7], [-5.9, 4.3, 1.4, 1.2, 0.9], [-3.5, 4.4, 1.8, 1.1, 1.2],
-    [-0.8, 4.2, 1.2, 1.5, 1.8], [2.0, 4.1, 1.6, 1.3, 1.0], [4.9, 4.2, 1.3, 1.6, 1.4],
+    [-7.2, -5.6, 2, 0.108, 0], [-2.6, -5.6, 0, 0.082, 0], [2.4, -5.6, 2, 0.100, 0], [7.0, -5.6, 0, 0.088, 0],
+    [-7.4, -2.0, 0, 0.078, 0], [-3.0, -1.9, 1, 0.058, 0], [0.9, -2.0, 2, 0.092, 0], [6.6, -1.9, 1, 0.054, 1],
+    [-7.0, 1.6, 1, 0.060, 1], [-2.4, 1.7, 2, 0.104, 0], [2.2, 1.6, 0, 0.084, 0], [7.0, 1.7, 2, 0.096, 1],
+    [-6.4, 5.2, 0, 0.086, 0], [-1.4, 5.3, 2, 0.110, 0], [3.2, 5.2, 1, 0.062, 0], [7.6, 5.2, 0, 0.080, 1],
   ];
   const facadeVariants = [
     { base: "#22404f", lit: 0.34 },
@@ -133,12 +134,46 @@ function buildScene() {
     roughness: 0.68,
     metalness: 0.24,
   }));
-  buildings.forEach(([x, z, w, d, h], index) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), facadeVariants[index % facadeVariants.length]);
-    mesh.position.set(x, h / 2, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    scene.add(mesh);
+  const placeFallbackBoxes = () => {
+    const fallbackSize = [[2.9, 1.6, 1.2], [1.4, 1.0, 2.2], [3.8, 1.5, 0.85]];
+    buildings.forEach(([x, z, which, , quarter], index) => {
+      const [w, d, h] = fallbackSize[which];
+      const swap = quarter % 2 === 1;
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(swap ? d : w, h, swap ? w : d),
+        facadeVariants[index % facadeVariants.length],
+      );
+      mesh.position.set(x, h / 2, z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+    });
+  };
+
+  // Blender 生成的建筑资产（assets/buildings/generate_buildings.py 可复现）；
+  // 加载失败时退化为程序化方块，保证演示不空场
+  const archetypes = ["factory", "office", "warehouse"];
+  const loader = new GLTFLoader();
+  const loadModel = (name) => new Promise((resolve) =>
+    loader.load(`./assets/buildings/${name}.glb?v=1`, resolve, undefined, () => resolve(null)));
+  Promise.all(archetypes.map(loadModel)).then((gltfs) => {
+    if (gltfs.some((gltf) => !gltf)) {
+      placeFallbackBoxes();
+      return;
+    }
+    buildings.forEach(([x, z, which, scale, quarter]) => {
+      const instance = gltfs[which].scene.clone(true);
+      instance.scale.setScalar(scale);
+      instance.rotation.y = quarter * Math.PI / 2;
+      instance.position.set(x, 0, z);
+      instance.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      scene.add(instance);
+    });
   });
 
   const interactive = [];
