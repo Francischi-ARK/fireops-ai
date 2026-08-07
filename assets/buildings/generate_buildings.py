@@ -48,6 +48,104 @@ GLASS = lambda: mat("glass_cool", (0.16, 0.24, 0.30), rough=0.25, metal=0.3,
 LIT = lambda: mat("window_lit", (0.9, 0.7, 0.4), rough=0.4,
                   emission=(1.0, 0.72, 0.38), strength=3.2)
 DOOR = lambda: mat("door_shutter", (0.36, 0.38, 0.40), rough=0.6, metal=0.35)
+ACCENT = lambda: mat("warning_band", (0.72, 0.42, 0.16), rough=0.55, metal=0.2,
+                     emission=(0.9, 0.45, 0.12), strength=0.6)
+
+
+def build_mall():
+    """商业综合体：大裙楼 + 主力店角盒 + 环绕玻璃带 + 顶部招牌灯箱 + 中庭天窗。"""
+    rng = random.Random(53)
+    parts = []
+    wall, wall_dark, roof, trim, glass, lit = WALL(), WALL_DARK(), ROOF(), TRIM(), GLASS(), LIT()
+    box(parts, "podium", (0, 0, 6), (48, 34, 12), wall, bevel=0.2)
+    box(parts, "roof", (0, 0, 12.25), (49, 35, 0.5), roof)
+    parapet(parts, 0, 0, 48.8, 34.8, 12.5, trim, height=0.9)
+    # 主力店角盒（影院/旗舰），穿出裙楼屋面
+    box(parts, "anchor", (14, 8, 12), (18, 16, 24), wall_dark, bevel=0.2)
+    parapet(parts, 14, 8, 18.4, 16.4, 24.0, trim, height=0.9)
+    window_band(parts, rng, 14, 16.06, 15, 16, 3.0, "x", lit_ratio=0.5)
+    window_band(parts, rng, 14, 16.06, 20, 16, 3.0, "x", lit_ratio=0.4)
+    # 首二层通高玻璃环绕
+    window_band(parts, rng, 0, 17.06, 4.5, 46, 6.5, "x", lit_ratio=0.55)
+    window_band(parts, rng, 0, -17.06, 4.5, 46, 6.5, "x", lit_ratio=0.45)
+    window_band(parts, rng, 24.06, 0, 4.5, 32, 6.5, "y", lit_ratio=0.4)
+    window_band(parts, rng, -24.06, 0, 4.5, 32, 6.5, "y", lit_ratio=0.4)
+    window_band(parts, rng, 0, 17.06, 9.8, 46, 2.2, "x", lit_ratio=0.4)
+    window_band(parts, rng, 0, -17.06, 9.8, 46, 2.2, "x", lit_ratio=0.35)
+    # 顶部招牌灯箱带
+    box(parts, "sign", (0, 17.15, 11.2), (44, 0.18, 1.1), lit)
+    box(parts, "sign", (0, -17.15, 11.2), (44, 0.18, 1.1), lit)
+    box(parts, "sign", (14, 16.15, 22.6), (16, 0.18, 1.0), lit)
+    # 主入口大雨棚
+    box(parts, "entry_canopy", (0, -18.8, 5.2), (16, 4.5, 0.4), trim)
+    for x in (-6, -2, 2, 6):
+        box(parts, "canopy_col", (x, -20.2, 2.6), (0.35, 0.35, 5.2), trim)
+    box(parts, "entry_glass", (0, -17.06, 2.8), (12, 0.14, 5.6), glass)
+    # 屋面中庭天窗与设备
+    box(parts, "skylight", (-8, 0, 13.2), (12, 8, 1.4), glass, bevel=0.15)
+    box(parts, "skylight", (8, -6, 13.2), (8, 6, 1.4), glass, bevel=0.15)
+    for i, (x, y) in enumerate(((-16, 8), (-16, 2), (-10, 12))):
+        box(parts, "ahu", (x, y, 13.3), (2.8, 2.2, 1.5), trim, bevel=0.05)
+    return parts
+
+
+def build_tower():
+    """地标塔楼：三段收分 + 竖向幕墙线条 + 发光冠部，天际线制高点。"""
+    rng = random.Random(67)
+    parts = []
+    wall, wall_dark, trim, glass, lit = WALL(), WALL_DARK(), TRIM(), GLASS(), LIT()
+    box(parts, "podium", (0, 0, 2.5), (30, 26, 5), wall, bevel=0.12)
+    parapet(parts, 0, 0, 30.4, 26.4, 5.0, trim, height=0.7)
+    box(parts, "seg1", (0, 0, 27), (24, 22, 44), wall_dark, bevel=0.15)
+    box(parts, "seg2", (0, 0, 60), (19, 17, 22), wall_dark, bevel=0.15)
+    box(parts, "crown", (0, 0, 74.5), (14, 12, 7), glass, bevel=0.1)
+    # 竖向幕墙梃：与办公楼的水平线脚形成对比
+    for face_y in (11.06, -11.06):
+        for k in range(12):
+            x = -11 + k * 2.0
+            box(parts, "fin", (x, face_y, 27), (0.16, 0.14, 43), trim)
+    for face_x in (12.06, -12.06):
+        for k in range(11):
+            y = -10 + k * 2.0
+            box(parts, "fin", (face_x, y, 27), (0.14, 0.16, 43), trim)
+    for face_y in (8.56, -8.56):
+        for k in range(9):
+            x = -8 + k * 2.0
+            box(parts, "fin", (x, face_y, 60), (0.16, 0.14, 21), trim)
+    # 竖向亮窗条
+    for k in range(10):
+        if rng.random() < 0.6:
+            x = -10 + k * 2.0
+            z0 = 8 + rng.random() * 20
+            box(parts, "litstrip", (x, 11.12, z0 + 6), (1.1, 0.08, 12), lit)
+        if rng.random() < 0.5:
+            x = -10 + k * 2.0
+            z0 = 8 + rng.random() * 20
+            box(parts, "litstrip", (x, -11.12, z0 + 6), (1.1, 0.08, 12), lit)
+    # 发光冠部环带与尖顶
+    box(parts, "crown_band", (0, 0, 74.5), (14.4, 12.4, 1.4), lit)
+    box(parts, "crown_band", (0, 0, 71.5), (19.4, 17.4, 0.8), lit)
+    cyl(parts, "spire", (0, 0, 80), 0.12, 6.0, trim)
+    # 裙楼入口
+    box(parts, "entry_canopy", (0, -14.2, 4.4), (12, 3.0, 0.35), trim)
+    box(parts, "entry_glass", (0, -13.06, 2.2), (9, 0.12, 4.4), glass)
+    return parts
+
+
+def build_tanks():
+    """储能/罐区：成排储罐 + 橙色警示环 + 管廊，新能源园区的特征地貌。"""
+    parts = []
+    wall, trim, accent = WALL(), TRIM(), ACCENT()
+    positions = [(-9, -5), (0, -5), (9, -5), (-9, 5), (0, 5), (9, 5)]
+    for i, (x, y) in enumerate(positions):
+        r = 4.2 if i % 2 == 0 else 3.4
+        h = 10 + (i % 3) * 1.6
+        cyl(parts, "tank", (x, y, h / 2), r, h, wall)
+        cyl(parts, "tank_top", (x, y, h + 0.25), r * 0.96, 0.5, trim)
+        cyl(parts, "tank_band", (x, y, h * 0.72), r + 0.07, 1.0, accent)
+    box(parts, "pipe_rack", (0, 0, 1.2), (26, 1.4, 2.4), trim)
+    box(parts, "pipe_rack", (0, -8.5, 1.0), (26, 1.2, 2.0), trim)
+    return parts
 
 
 def box(parts, name, loc, dims, material, bevel=0.0, rot=(0.0, 0.0, 0.0)):
@@ -281,7 +379,10 @@ def export(parts, name):
 def main():
     for builder, name in ((build_factory, "factory.glb"),
                           (build_office, "office.glb"),
-                          (build_warehouse, "warehouse.glb")):
+                          (build_warehouse, "warehouse.glb"),
+                          (build_mall, "mall.glb"),
+                          (build_tower, "tower.glb"),
+                          (build_tanks, "tanks.glb")):
         clear_scene()
         export(builder(), name)
         print("exported", name)
