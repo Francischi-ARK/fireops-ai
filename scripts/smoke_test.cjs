@@ -4,7 +4,7 @@ const { pathToFileURL } = require("node:url");
 const { chromium } = require("playwright");
 
 // ponytail: file:// blocks ES modules; SMOKE_APP_ROOT=http://127.0.0.1:4173/ runs against the local server.
-const APP_ROOT = process.env.SMOKE_APP_ROOT || pathToFileURL(path.join(__dirname, "index.html")).href;
+const APP_ROOT = process.env.SMOKE_APP_ROOT || pathToFileURL(path.join(__dirname, "../index.html")).href;
 const APP_URL = `${APP_ROOT}#/home`;
 const INSPECTION_URL = `${APP_ROOT}#/inspections`;
 
@@ -18,11 +18,12 @@ async function main() {
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(String(error)));
 
+  try {
   await page.goto(APP_URL);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await assertVisible(page.getByRole("heading", { name: "选择工作台" }));
   assert.equal(await page.locator("[data-workspace-link]").count(), 5);
-  await page.screenshot({ path: path.join(__dirname, "workspaces-1440x1024.png") });
+  await page.screenshot({ path: path.join(__dirname, "../workspaces-1440x1024.png") });
   await page.getByRole("link", { name: /消防监督检查工具/ }).click();
   assert.match(page.url(), /#\/inspections$/);
   await assertVisible(page.getByRole("heading", { name: "监督检查与隐患闭环" }));
@@ -46,7 +47,7 @@ async function main() {
   await page.getByRole("button", { name: "数据导入" }).click();
   const importDialog = page.locator("#import-dialog");
   await assertVisible(importDialog);
-  const csvDir = path.join(__dirname, "demo-data");
+  const csvDir = path.join(__dirname, "../demo-data");
   await page.locator("#csv-files").setInputFiles(
     ["enterprises.csv", "alarm_events.csv", "iot_devices.csv", "maintenance_records.csv", "findings.csv"].map((name) => path.join(csvDir, name)),
   );
@@ -79,18 +80,19 @@ async function main() {
   assert.match(await editor.inputValue(), /消防/);
 
   await page.goto(INSPECTION_URL);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(2500);
-  await page.screenshot({ path: path.join(__dirname, "implementation-1440x1024.png") });
-  await page.screenshot({ path: path.join(__dirname, "preview.png"), fullPage: true });
+  await page.screenshot({ path: path.join(__dirname, "../implementation-1440x1024.png") });
+  await page.screenshot({ path: path.join(__dirname, "../preview.png"), fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await assertVisible(page.locator(".company-rail"));
-
+  } finally {
   await browser.close();
+  }
   assert.deepEqual(errors, []);
   console.log("fire inspection workbench smoke test: ok");
 }

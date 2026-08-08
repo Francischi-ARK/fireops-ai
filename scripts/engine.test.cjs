@@ -1,12 +1,12 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction } = require("./engine.cjs");
+const { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction } = require("../engine.cjs");
 
 const mode = process.argv[2] || "all";
 
 function loadBundle() {
-  const directory = path.join(__dirname, "demo-data");
+  const directory = path.join(__dirname, "../demo-data");
   return Object.fromEntries(
     ["enterprises.csv", "alarm_events.csv", "iot_devices.csv", "maintenance_records.csv", "findings.csv"].map((name) => [
       name,

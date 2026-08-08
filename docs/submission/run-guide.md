@@ -68,8 +68,8 @@ createdb -h 127.0.0.1 -p 54329 -U fireguard fireguard_test
 FIREGUARD_TEST_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54329/fireguard_test \
   PYTHONPATH=. uv run python tests/reset_test_database.py
 FIREGUARD_TEST_DATABASE_URL=... PYTHONPATH=. uv run python -m unittest discover -s tests
-node smoke_test.cjs        # 前端冒烟
-node copilot_e2e.cjs       # 三场景 E2E（需后端运行中）
+node scripts/smoke_test.cjs        # 前端冒烟
+node scripts/copilot_e2e.cjs       # 三场景 E2E（需后端运行中）
 ```
 
 重复运行 E2E 前先清空演示库状态（否则场景 B 会撞上站点已被占用）：
@@ -79,7 +79,7 @@ docker exec fireguard-postgres psql -U fireguard -d fireguard -c \
   "TRUNCATE incident_timeline, dispatch_reports, incident_dispatches, fire_incidents, signal_verifications, monitoring_events, copilot_runs; UPDATE fire_stations SET status='available';"
 ```
 
-冒烟脚本在 file:// 下会被浏览器拦截 ES module，走本地服务：`SMOKE_APP_ROOT="http://127.0.0.1:4173/" node smoke_test.cjs`。
+冒烟脚本在 file:// 下会被浏览器拦截 ES module，走本地服务：`SMOKE_APP_ROOT="http://127.0.0.1:4173/" node scripts/smoke_test.cjs`。
 
 ## 8. 注意事项
 

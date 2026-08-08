@@ -14,7 +14,7 @@ async function main() {
   });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1024 },
-    recordVideo: { dir: __dirname, size: { width: 1440, height: 1024 } },
+    recordVideo: { dir: path.join(__dirname, ".."), size: { width: 1440, height: 1024 } },
   });
   const page = await context.newPage();
 

@@ -45,7 +45,7 @@ async function main() {
   assert.ok((await page.locator(".copilot-missing span").count()) >= 5, "scenario C missing fields");
 
   assert.deepEqual(errors, []);
-  await page.screenshot({ path: path.join(__dirname, "copilot-e2e.png"), fullPage: true });
+  await page.screenshot({ path: path.join(__dirname, "../copilot-e2e.png"), fullPage: true });
 
   // Mobile Web: persistent navigation, human confirmation and downloadable audit evidence.
   await page.setViewportSize({ width: 390, height: 844 });
@@ -70,7 +70,7 @@ async function main() {
   assert.equal(auditPack.schema_version, "fireguard-audit-pack/v1");
   assert.equal(auditPack.human_decisions[0].value, "dismissed");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  await page.screenshot({ path: path.join(__dirname, "copilot-mobile-390x844.png"), fullPage: true });
+  await page.screenshot({ path: path.join(__dirname, "../copilot-mobile-390x844.png"), fullPage: true });
 
   await browser.close();
   console.log("copilot e2e ok");

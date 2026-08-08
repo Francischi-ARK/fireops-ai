@@ -39,7 +39,7 @@ Scenario 模式离线可复现三个演示场景；Live 模式设置 `COPILOT_MO
 ## 验证
 
 - 后端 44 个测试：`unittest discover`（含工具守门、双模式回退、证据链集成、运行持久化）
-- 前端冒烟：`smoke_test.cjs`；三场景 E2E + 390px 手机确认链：`copilot_e2e.cjs`
+- 前端冒烟：`scripts/smoke_test.cjs`；三场景 E2E + 390px 手机确认链：`scripts/copilot_e2e.cjs`
 - 评测报告：[eval-report](docs/submission/eval-report.md)
 
 ## 文档

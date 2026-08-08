@@ -2,7 +2,7 @@ const path = require("node:path");
 const { chromium } = require("playwright");
 
 const ROOT = "http://127.0.0.1:4173/";
-const OUT = process.argv[2] || __dirname;
+const OUT = process.argv[2] || path.join(__dirname, "..");
 
 async function main() {
   const browser = await chromium.launch({
