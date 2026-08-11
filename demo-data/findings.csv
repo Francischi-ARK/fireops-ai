@@ -1,4 +1,4 @@
 finding_id,enterprise_id,category,severity,description,found_at,due_at,status,verified_at,repeat_key,quality,raw_ref
-finding-001,ent-001,fire_control_room,high,消防控制室值班记录不完整,2026-07-09T09:02:00+08:00,2026-06-15T18:00:00+08:00,open,,control-room/duty-record,valid,demo/finding/001
-finding-002,ent-001,fire_control_room,medium,消防控制室值班记录不完整,2026-03-10T10:00:00+08:00,2026-03-20T18:00:00+08:00,verified,2026-03-18T14:00:00+08:00,control-room/duty-record,valid,demo/finding/002
-finding-003,ent-001,fire_control_room,medium,消防控制室值班记录不完整,2026-02-15T11:00:00+08:00,2026-02-25T18:00:00+08:00,verified,2026-02-23T15:00:00+08:00,control-room/duty-record,valid,demo/finding/003
+finding-001,ent-001,fire_control_room,high,消控室值班记录不完整（电池车间）,2026-07-09T09:02:00+08:00,2026-06-15T18:00:00+08:00,open,,control-room/duty-record,valid,demo/finding/001
+finding-002,ent-001,fire_control_room,medium,消控室值班记录不完整（电池车间）,2026-03-10T10:00:00+08:00,2026-03-20T18:00:00+08:00,verified,2026-03-18T14:00:00+08:00,control-room/duty-record,valid,demo/finding/002
+finding-003,ent-001,fire_control_room,medium,消控室值班记录不完整（电池车间）,2026-02-15T11:00:00+08:00,2026-02-25T18:00:00+08:00,verified,2026-02-23T15:00:00+08:00,control-room/duty-record,valid,demo/finding/003

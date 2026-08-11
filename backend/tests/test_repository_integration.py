@@ -52,8 +52,8 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await self.repository.verify_signal(event["id"], "dismissed")
 
         incident_id = confirmed["incident"]["id"]
-        dispatched = await self.repository.dispatch_incident(incident_id, "station-hx-01")
-        duplicate_dispatch = await self.repository.dispatch_incident(incident_id, "station-hx-01")
+        dispatched = await self.repository.dispatch_incident(incident_id, "crew-wx-01")
+        duplicate_dispatch = await self.repository.dispatch_incident(incident_id, "crew-wx-01")
         self.assertTrue(dispatched["changed"])
         self.assertFalse(duplicate_dispatch["changed"])
         self.assertEqual(dispatched["station"]["status"], "awaiting_ack")
@@ -77,8 +77,8 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(repeated_report["changed"])
         self.assertEqual(len(report["incident"]["timeline"]), 6)
 
-        station_tasks = await self.repository.get_station_tasks("station-hx-01")
-        other_station_tasks = await self.repository.get_station_tasks("station-hx-02")
+        station_tasks = await self.repository.get_station_tasks("crew-wx-01")
+        other_station_tasks = await self.repository.get_station_tasks("crew-wx-02")
         self.assertEqual(station_tasks["tasks"][0]["id"], incident_id)
         self.assertEqual(other_station_tasks["tasks"], [])
 

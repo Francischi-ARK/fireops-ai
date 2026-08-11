@@ -7,12 +7,18 @@ const mode = process.argv[2] || "all";
 
 function loadBundle() {
   const directory = path.join(__dirname, "../demo-data");
-  return Object.fromEntries(
+  const bundle = Object.fromEntries(
     ["enterprises.csv", "alarm_events.csv", "iot_devices.csv", "maintenance_records.csv", "findings.csv"].map((name) => [
       name,
       parseCsv(fs.readFileSync(path.join(directory, name), "utf8")),
     ]),
   );
+  // 导入包按单企业校验：种子目录同时服务多企业场景，这里裁成 enterprises.csv 声明的主体。
+  const primary = bundle["enterprises.csv"][0].enterprise_id;
+  for (const name of Object.keys(bundle)) {
+    if (name !== "enterprises.csv") bundle[name] = bundle[name].filter((row) => row.enterprise_id === primary);
+  }
+  return bundle;
 }
 
 function testParser() {
@@ -26,9 +32,9 @@ function testScoring() {
   assert.deepEqual(validateBundle(bundle), { valid: true, errors: [] });
   const first = scoreBundle(bundle);
   const second = scoreBundle(bundle);
-  assert.equal(first.totalScore, 58, "expected FireGuard demo score 58");
+  assert.equal(first.totalScore, 48, "expected FireOps demo score 48");
   assert.equal(first.riskLevel, "high");
-  assert.deepEqual(first.triggeredRules.map((rule) => rule.code), ["FG-ALARM-01", "FG-IOT-01", "FG-RECT-01", "FG-REPEAT-01"]);
+  assert.deepEqual(first.triggeredRules.map((rule) => rule.code), ["FG-ALARM-01", "FG-IOT-01", "FG-MAINT-01", "FG-RECT-01", "FG-REPEAT-01"]);
   assert.ok(first.triggeredRules.every((rule) => rule.evidence.length > 0));
   assert.deepEqual(first, second, "same input and ruleset must be deterministic");
   const changedBundle = structuredClone(bundle);

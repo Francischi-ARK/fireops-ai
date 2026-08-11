@@ -34,7 +34,7 @@ class IncidentApiTests(unittest.TestCase):
 
     def test_overview_and_station_tasks_are_simulation_only(self):
         overview = self.client.get("/incidents/overview")
-        station = self.client.get("/stations/station-hx-01/tasks")
+        station = self.client.get("/stations/crew-wx-01/tasks")
         missing = self.client.get("/stations/missing/tasks")
 
         self.assertEqual(overview.status_code, 200)

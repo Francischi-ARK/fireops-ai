@@ -1,3 +1,7 @@
 maintenance_id,enterprise_id,facility_type,maintenance_type,planned_at,completed_at,status,quality,raw_ref
-maint-001,ent-001,fire_alarm_system,monthly,2026-07-20T09:00:00+08:00,2026-07-20T14:30:00+08:00,completed,valid,demo/maint/001
-maint-002,ent-001,fire_water_system,quarterly,2026-07-25T09:00:00+08:00,2026-07-25T11:30:00+08:00,completed,valid,demo/maint/002
+maint-001,ent-005,火灾自动报警系统,月度报警功能测试（机1回路1）,2026-07-28T09:00:00+08:00,2026-07-28T11:30:00+08:00,completed,valid,demo/maint/001
+maint-002,ent-005,气体灭火系统,调漆间钢瓶压力与电磁阀线路检查,2026-07-15T09:00:00+08:00,2026-07-15T10:20:00+08:00,completed,valid,demo/maint/002
+maint-003,ent-001,火灾自动报警系统,主机备电蓄电池季度检查,2026-07-05T09:00:00+08:00,,overdue,valid,demo/maint/003
+maint-004,ent-001,火灾自动报警系统,主机备电蓄电池更换（上次 2023-06）,2026-06-30T09:00:00+08:00,,overdue,valid,demo/maint/004
+maint-005,ent-001,气体灭火系统,电池测试间联动试验（断开电磁阀）,2026-07-20T14:00:00+08:00,2026-07-20T16:00:00+08:00,completed,valid,demo/maint/005
+maint-006,ent-002,室内消火栓系统,季度巡检,2026-07-10T09:00:00+08:00,2026-07-10T11:00:00+08:00,completed,valid,demo/maint/006

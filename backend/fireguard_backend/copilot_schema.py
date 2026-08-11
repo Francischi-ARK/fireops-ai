@@ -8,14 +8,20 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Intent = Literal["signal_verification", "incident_dispatch_support", "unknown"]
-
-EvidenceKind = Literal[
-    "signal", "maintenance", "iot", "site", "finding",
-    "station", "incident", "image", "report",
+Intent = Literal[
+    "signal_verification",
+    "incident_response_support",
+    "fault_diagnosis",
+    "gas_release_advisory",
+    "unknown",
 ]
 
-ApprovalAction = Literal["verification_result", "dispatch_order"]
+EvidenceKind = Literal[
+    "signal", "maintenance", "iot", "site", "finding", "point",
+    "crew", "incident", "knowledge", "image", "report",
+]
+
+ApprovalAction = Literal["verification_result", "workorder_dispatch"]
 
 
 class EvidenceRef(BaseModel):

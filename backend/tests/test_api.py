@@ -9,10 +9,10 @@ class FakeRepository:
     def __init__(self):
         self.enterprise = {
             "id": "ent-001",
-            "name": "皓源新能源（虚拟）",
-            "industry": "锂离子电池制造",
-            "district": "高新区",
-            "building": "1号生产厂房",
+            "name": "电池车间（PACK/化成）",
+            "industry": "锂电 PACK 与化成工艺",
+            "district": "西区",
+            "building": "电池车间厂房",
             "health_score": 58,
             "risk_level": "high",
             "online_rate": 89.0,

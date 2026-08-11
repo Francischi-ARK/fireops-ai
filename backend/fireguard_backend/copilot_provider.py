@@ -20,6 +20,9 @@ class CopilotProvider:
     async def get_site_profile(self, enterprise_id):
         return await self.repository.get_site_profile(enterprise_id)
 
+    async def get_device_point(self, controller_no, loop_no, point_no):
+        return await self.repository.get_device_point(controller_no, loop_no, point_no)
+
     async def get_maintenance(self, enterprise_id):
         path = self.demo_data_dir / "maintenance_records.csv"
         if not path.exists():
@@ -27,7 +30,28 @@ class CopilotProvider:
         with path.open(encoding="utf-8") as handle:
             return [row for row in csv.DictReader(handle) if row["enterprise_id"] == enterprise_id]
 
-    async def list_stations(self):
+    async def search_knowledge(self, query, limit=3):
+        """确定性的知识库关键词检索：按命中关键词数排序，零命中不返回。
+
+        ponytail: 演示用简化实现；生产环境可替换为向量检索 + 重排，接口不变。
+        """
+        path = self.demo_data_dir / "knowledge.csv"
+        if not path.exists():
+            return []
+        tokens = [token for token in query.replace("，", " ").replace("、", " ").split() if token]
+        if not tokens:
+            return []
+        scored = []
+        with path.open(encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                haystack = " ".join((row["topic"], row["symptom"], row["guidance"], row["keywords"]))
+                score = sum(1 for token in tokens if token in haystack)
+                if score > 0:
+                    scored.append((score, row))
+        scored.sort(key=lambda item: (-item[0], item[1]["kb_id"]))
+        return [row for _, row in scored[:limit]]
+
+    async def list_crews(self):
         return await self.repository.list_stations()
 
     async def get_incident(self, incident_id):

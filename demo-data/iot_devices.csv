@@ -1,4 +1,4 @@
 device_id,enterprise_id,device_type,location,expected_online,last_heartbeat,quality,raw_ref
-dev-001,ent-001,gateway,消防泵房,true,2026-07-28T06:00:00+08:00,valid,demo/iot/dev-001
+ark-gw-01,ent-001,ark_edge_gateway,电池车间消控室（接机2火警主机 RS485）,true,2026-07-28T06:00:00+08:00,valid,demo/iot/ark-gw-01
 dev-002,ent-001,pipe_pressure_sensor,湿式报警阀间,true,2026-07-29T11:58:00+08:00,valid,demo/iot/dev-002
 dev-003,ent-001,tank_level_sensor,消防水池,true,2026-07-29T11:57:00+08:00,valid,demo/iot/dev-003

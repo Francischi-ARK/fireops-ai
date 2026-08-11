@@ -1,4 +1,4 @@
-"""Server-side tool layer for the Incident Copilot.
+"""Server-side tool layer for the FireOps Copilot（工厂消防设备运维 Agent）.
 
 Tools are read-only or produce drafts. Domain state changes stay behind the
 existing verification/dispatch APIs; the single exception is
@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .copilot_schema import AgentPlan, EvidenceRef, ToolCall
 
-# Fields an incident report should cover before anyone recommends dispatch.
-INCIDENT_REQUIRED_FIELDS = ["具体地点", "人员情况", "危险源", "发展趋势", "已采取措施"]
+# 现场核实一次报警前应补齐的要素（对应企业应急处置卡的首问项）。
+INCIDENT_REQUIRED_FIELDS = ["具体位置", "现场烟雾或火光", "人员情况", "工艺运行状态", "已采取措施"]
 
 
 class SignalArgs(BaseModel):
@@ -34,9 +34,16 @@ class VerificationDraftArgs(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
-class DispatchDraftArgs(BaseModel):
-    incident_id: int
-    station_id: str = Field(min_length=1, max_length=80)
+class SearchManualArgs(BaseModel):
+    query: str = Field(min_length=1, max_length=200)
+    limit: int = Field(default=3, ge=1, le=8)
+
+
+class WorkorderDraftArgs(BaseModel):
+    crew_id: str = Field(min_length=1, max_length=80)
+    incident_id: Optional[int] = None
+    event_id: Optional[int] = None
+    summary: str = Field(default="", max_length=300)
 
 
 class RoleBriefArgs(BaseModel):
@@ -63,6 +70,7 @@ class RunContext:
     enterprise_id: str
     event_id: Optional[int] = None
     incident_id: Optional[int] = None
+    event_type: str = ""
     verification_status: str = "pending"
     approvals: Set[str] = field(default_factory=set)
     collected_evidence: List[EvidenceRef] = field(default_factory=list)
@@ -79,6 +87,19 @@ async def _get_signal_context(provider, args: SignalArgs, ctx: RunContext) -> To
     evidence = []
     if signal.get("raw_ref"):
         evidence.append(EvidenceRef(ref=signal["raw_ref"], kind="signal"))
+    payload = signal.get("payload") or {}
+    # 报警信号若来自网关解析的 Modbus 帧，补充点位编码表档案作为证据。
+    if all(key in payload for key in ("controller_no", "loop_no", "point_no")):
+        point = await provider.get_device_point(
+            payload["controller_no"], payload["loop_no"], payload["point_no"],
+        )
+        if point:
+            signal = dict(signal)
+            signal["device_point"] = point
+            evidence.append(EvidenceRef(
+                ref=point["point_id"], kind="point",
+                note=f"机{point['controller_no']}回路{point['loop_no']}点位{point['point_no']} {point['location']}",
+            ))
     return ToolResult(ok=True, data=signal, evidence=evidence)
 
 
@@ -90,7 +111,7 @@ async def _get_site_packet(provider, args: EnterpriseArgs, ctx: RunContext) -> T
     return ToolResult(
         ok=True,
         data={"enterprise": enterprise, "profile": profile},
-        evidence=[EvidenceRef(ref=enterprise["id"], kind="site", note="企业与场地档案")],
+        evidence=[EvidenceRef(ref=enterprise["id"], kind="site", note="厂区单元与应急处置档案")],
     )
 
 
@@ -124,35 +145,56 @@ async def _create_verification_draft(provider, args: VerificationDraftArgs, ctx:
     })
 
 
-async def _recommend_station(provider, args: EnterpriseArgs, ctx: RunContext) -> ToolResult:
+async def _search_manual(provider, args: SearchManualArgs, ctx: RunContext) -> ToolResult:
+    """在说明书/规约/管理制度知识库中做确定性关键词检索。"""
+    entries = await provider.search_knowledge(args.query, args.limit)
+    evidence = [
+        EvidenceRef(ref=entry["kb_id"], kind="knowledge",
+                    note=f"{entry['source']} {entry['section']}")
+        for entry in entries
+    ]
+    return ToolResult(ok=True, data={"query": args.query, "entries": entries}, evidence=evidence)
+
+
+async def _recommend_crew(provider, args: EnterpriseArgs, ctx: RunContext) -> ToolResult:
     enterprise = await provider.get_enterprise(args.enterprise_id)
     if not enterprise:
         return _fail("enterprise_not_found")
-    stations = await provider.list_stations()
-    available = [s for s in stations if s.get("status") == "available"]
-    in_district = [s for s in available if s.get("district") == enterprise.get("district")]
+    crews = await provider.list_crews()
+    available = [c for c in crews if c.get("status") == "available"]
+    in_district = [c for c in available if c.get("district") == enterprise.get("district")]
     recommended = in_district or available
     return ToolResult(
         ok=True,
-        data={"recommended": recommended, "backup": [s for s in available if s not in recommended]},
-        evidence=[EvidenceRef(ref=s["id"], kind="station") for s in recommended],
+        data={"recommended": recommended, "backup": [c for c in available if c not in recommended]},
+        evidence=[EvidenceRef(ref=c["id"], kind="crew") for c in recommended],
     )
 
 
-async def _create_dispatch_draft(provider, args: DispatchDraftArgs, ctx: RunContext) -> ToolResult:
-    incident = await provider.get_incident(args.incident_id)
-    if not incident:
-        return _fail("incident_not_found")
+async def _create_workorder_draft(provider, args: WorkorderDraftArgs, ctx: RunContext) -> ToolResult:
+    """处置/维修工单草稿：火警走事件链（incident_id），设施故障走信号链（event_id）。"""
+    if args.incident_id is None and args.event_id is None:
+        return _fail("invalid_arguments")
+    if args.incident_id is not None:
+        incident = await provider.get_incident(args.incident_id)
+        if not incident:
+            return _fail("incident_not_found")
+    else:
+        signal = await provider.get_signal(args.event_id)
+        if not signal:
+            return _fail("signal_not_found")
     return ToolResult(ok=True, data={
         "is_draft": True,
         "incident_id": args.incident_id,
-        "station_id": args.station_id,
-        "requires_approval": "dispatch_order",
+        "event_id": args.event_id,
+        "crew_id": args.crew_id,
+        "summary": args.summary,
+        "requires_approval": "workorder_dispatch",
     })
 
 
 async def _build_role_brief(provider, args: RoleBriefArgs, ctx: RunContext) -> ToolResult:
-    if args.role not in ("commander", "station", "enterprise"):
+    if args.role not in ("duty_officer", "responder", "area_owner"):
         return _fail("invalid_arguments")
     incident = await provider.get_incident(args.incident_id)
     if not incident:
@@ -160,7 +202,7 @@ async def _build_role_brief(provider, args: RoleBriefArgs, ctx: RunContext) -> T
     return ToolResult(
         ok=True,
         data={"role": args.role, "incident": incident, "is_draft": True,
-              "disclaimer": "仅供辅助，不替代现场指挥"},
+              "disclaimer": "仅供辅助，不替代现场处置决策与企业安全规程"},
         evidence=[EvidenceRef(ref=f"incident/{args.incident_id}", kind="incident")],
     )
 
@@ -181,18 +223,24 @@ class ToolSpec:
     state_check: Optional[Callable[[RunContext], bool]] = None
 
 
+def _workorder_allowed(ctx: RunContext) -> bool:
+    # 火警必须先经人工核实确认；设施故障类事件可直接起草维修工单。
+    return ctx.verification_status == "confirmed" or ctx.event_type == "fault"
+
+
 TOOLS: Dict[str, ToolSpec] = {
-    "get_signal_context": ToolSpec(SignalArgs, _get_signal_context, "读取设备信号与核实状态"),
-    "get_site_packet": ToolSpec(EnterpriseArgs, _get_site_packet, "读取企业、建筑、危险源、入口、水源与预案档案"),
-    "get_maintenance_context": ToolSpec(EnterpriseArgs, _get_maintenance_context, "读取维保与故障记录"),
-    "find_missing_fields": ToolSpec(MissingFieldsArgs, _find_missing_fields, "对照必填字段列出信息缺口"),
+    "get_signal_context": ToolSpec(SignalArgs, _get_signal_context, "读取报警/故障信号、Modbus 解码与点位档案"),
+    "get_site_packet": ToolSpec(EnterpriseArgs, _get_site_packet, "读取厂区单元、危险源、出入口、水源与消防设施档案"),
+    "get_maintenance_context": ToolSpec(EnterpriseArgs, _get_maintenance_context, "读取维保计划与历史记录"),
+    "find_missing_fields": ToolSpec(MissingFieldsArgs, _find_missing_fields, "对照现场核实要素列出信息缺口"),
     "create_verification_draft": ToolSpec(VerificationDraftArgs, _create_verification_draft, "生成待核实任务草稿"),
-    "recommend_station": ToolSpec(EnterpriseArgs, _recommend_station, "按辖区与站点状态给出调派建议"),
-    "create_dispatch_draft": ToolSpec(
-        DispatchDraftArgs, _create_dispatch_draft, "生成调派草稿（不执行调派）",
-        state_check=lambda ctx: ctx.verification_status == "confirmed",
+    "search_manual": ToolSpec(SearchManualArgs, _search_manual, "检索控制器说明书、通讯规约与管理制度知识库"),
+    "recommend_crew": ToolSpec(EnterpriseArgs, _recommend_crew, "按片区与班组状态给出处置/维保班组建议"),
+    "create_workorder_draft": ToolSpec(
+        WorkorderDraftArgs, _create_workorder_draft, "生成处置/维修工单草稿（不执行派发）",
+        state_check=_workorder_allowed,
     ),
-    "build_role_brief": ToolSpec(RoleBriefArgs, _build_role_brief, "生成指挥台/站端/企业端角色摘要"),
+    "build_role_brief": ToolSpec(RoleBriefArgs, _build_role_brief, "生成值班台/处置班组/网格责任人角色摘要"),
     "append_incident_activity": ToolSpec(
         AppendActivityArgs, _append_incident_activity, "人工确认后写入事件时间线",
         requires_approval=True,

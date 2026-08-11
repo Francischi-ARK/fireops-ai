@@ -1,4 +1,6 @@
+import csv
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from psycopg import AsyncConnection
@@ -33,16 +35,46 @@ CREATE TABLE IF NOT EXISTS enterprises (
 )
 """
 
-CREATE_EVENTS_SQL = """
+# 事件类型覆盖海湾 Modbus 事件池全部类型（火警/故障/启动/停动/隔离/释放/
+# 监管/反馈/动作/复位/恢复/控制器状态），外加企业内部的维保逾期与人工核实请求。
+EVENT_TYPES_SQL = (
+    "'fire_alarm', 'fault', 'start', 'stop', 'isolate', 'release', 'supervise', "
+    "'feedback', 'action', 'reset', 'restore', 'controller_status', "
+    "'maintenance_overdue', 'verification_requested'"
+)
+
+CREATE_EVENTS_SQL = f"""
 CREATE TABLE IF NOT EXISTS monitoring_events (
     id BIGSERIAL PRIMARY KEY,
     enterprise_id TEXT NOT NULL REFERENCES enterprises(id),
-    event_type TEXT NOT NULL CHECK (event_type IN ('fire_alarm', 'fault', 'maintenance_overdue', 'verification_requested')),
+    event_type TEXT NOT NULL CHECK (event_type IN ({EVENT_TYPES_SQL})),
     severity TEXT NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info')),
     source TEXT NOT NULL,
-    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    payload JSONB NOT NULL DEFAULT '{{}}'::jsonb,
     occurred_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+"""
+
+# 已存在的库（旧版约束只允许 4 种事件类型）需要就地放宽约束。
+MIGRATE_EVENT_TYPES_SQL = f"""
+ALTER TABLE monitoring_events DROP CONSTRAINT IF EXISTS monitoring_events_event_type_check;
+ALTER TABLE monitoring_events ADD CONSTRAINT monitoring_events_event_type_check
+    CHECK (event_type IN ({EVENT_TYPES_SQL}))
+"""
+
+CREATE_DEVICE_POINTS_SQL = """
+CREATE TABLE IF NOT EXISTS device_points (
+    point_id TEXT PRIMARY KEY,
+    enterprise_id TEXT NOT NULL REFERENCES enterprises(id),
+    controller_no SMALLINT NOT NULL,
+    loop_no SMALLINT NOT NULL,
+    point_no SMALLINT NOT NULL,
+    device_type_code SMALLINT NOT NULL,
+    device_type TEXT NOT NULL,
+    location TEXT NOT NULL,
+    protect_target TEXT NOT NULL DEFAULT '',
+    UNIQUE (controller_no, loop_no, point_no)
 )
 """
 
@@ -105,24 +137,94 @@ CREATE TABLE IF NOT EXISTS copilot_runs (
 )
 """
 
+# 巡查隐患与运维工单：草稿→人工派发→关闭。与火警处置单分离。
+CREATE_FINDINGS_WORKORDERS_SQL = """
+CREATE TABLE IF NOT EXISTS inspection_findings (
+    id BIGSERIAL PRIMARY KEY,
+    enterprise_id TEXT NOT NULL REFERENCES enterprises(id),
+    title TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT '',
+    severity TEXT NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info')),
+    location TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    department TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
+    image_asset TEXT NOT NULL DEFAULT '',
+    voice_text TEXT NOT NULL DEFAULT '',
+    confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'assigned', 'in_progress', 'closed', 'abstained')),
+    pin JSONB NOT NULL DEFAULT '{}'::jsonb,
+    evidence_refs TEXT[] NOT NULL DEFAULT '{}',
+    due_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    dispatched_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS ops_workorders (
+    id BIGSERIAL PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('rectification', 'maintenance', 'repair')),
+    enterprise_id TEXT NOT NULL REFERENCES enterprises(id),
+    finding_id BIGINT REFERENCES inspection_findings(id),
+    event_id BIGINT REFERENCES monitoring_events(id),
+    maintenance_id TEXT,
+    crew_id TEXT,
+    owner TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'approved', 'in_progress', 'done', 'cancelled')),
+    evidence_refs TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    approved_at TIMESTAMPTZ
+)
+"""
+
+MIGRATE_OPS_EVENT_ID_SQL = """
+ALTER TABLE ops_workorders ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES monitoring_events(id)
+"""
+
+# 「星澜新能源汽车工厂（虚拟）」的厂区单元：id 沿用 ent- 前缀（entity）。
+# district 字段承载厂区片区（网格），用于处置班组责任区匹配。
 SEED_ENTERPRISES = [
-    ("ent-001", "皓源新能源（虚拟）", "锂离子电池制造", "高新区", "1号生产厂房", 58, "high", 89, 12, 3, 18, 2, 2),
-    ("ent-005", "恒泽材料（虚拟）", "新材料制造", "临港区", "1号生产厂房", 69, "high", 93, 8, 1, 9, 1, 4),
-    ("ent-002", "瑞虎机械（虚拟）", "通用设备制造", "经开区", "总装厂房", 76, "medium", 97, 6, 0, 4, 1, 3),
-    ("ent-003", "安澜仓储（虚拟）", "普通仓储", "物流园区", "1号仓库", 91, "low", 99, 2, 0, 1, 0, 1),
-    ("ent-004", "启明电子（虚拟）", "电子元件制造", "新城区", "2号厂房", 0, "unrated", 62, 0, 0, 0, 0, 1800),
+    ("ent-001", "电池车间（PACK/化成）", "锂电 PACK 与化成工艺", "西区", "电池车间厂房", 58, "high", 89, 12, 3, 18, 2, 2),
+    ("ent-005", "涂装车间（PT）", "喷涂与调漆工艺", "西区", "涂装车间厂房", 69, "high", 93, 8, 1, 9, 1, 4),
+    ("ent-002", "总装车间", "整车总装", "东区", "总装车间厂房", 76, "medium", 97, 6, 0, 4, 1, 3),
+    ("ent-003", "立体仓库", "高架仓储", "东区", "立体库", 91, "low", 99, 2, 0, 1, 0, 1),
+    ("ent-004", "冲压车间", "冲压成型", "西区", "冲压车间厂房", 0, "unrated", 62, 0, 0, 0, 0, 1800),
 ]
 
+# 企业内部处置力量：微型消防站承担确认火警的先期处置，维保组承担设施维修。
 SEED_STATIONS = [
-    ("station-hx-01", "高新消防救援站一站（虚拟）", "高新区", "available", 18, 4),
-    ("station-hx-02", "科创消防救援站（虚拟）", "高新区", "available", 16, 3),
-    ("station-jk-01", "经开消防救援站（虚拟）", "经开区", "available", 20, 5),
+    ("crew-wx-01", "微型消防站·西区站（虚拟）", "西区", "available", 6, 1),
+    ("crew-wx-02", "微型消防站·东区站（虚拟）", "东区", "available", 6, 1),
+    ("crew-wb-01", "消防设施维保组·驻厂（虚拟）", "西区", "available", 4, 1),
 ]
 
 SEED_PROFILES = {
-    "ent-001": ("高新区新能源产业园 1 号生产厂房（合成）", ["锂电池生产区域（合成）"], ["厂区东门（合成）"], ["厂区消防水池（合成）"], ["自动喷水灭火系统（合成）"]),
-    "ent-002": ("经开区装备路 8 号（合成）", ["机加工油品区域（合成）"], ["南侧主入口（合成）"], ["市政消火栓（合成）"], ["室内消火栓系统（合成）"]),
+    "ent-001": (
+        "星澜新能源汽车工厂（虚拟）西区 电池车间厂房",
+        ["锂电池模组半成品缓存区（合成）", "电芯化成区（合成）"],
+        ["车间南门（合成）", "车间东门（合成）"],
+        ["厂区环网消火栓（合成）", "厂区消防水池（合成）"],
+        ["自动喷水灭火系统（合成）", "电池测试间气体灭火系统（合成）", "锂电专用灭火器材（合成）"],
+    ),
+    "ent-005": (
+        "星澜新能源汽车工厂（虚拟）西区 涂装车间厂房",
+        ["调漆间可燃液体（合成）", "喷涂作业区（合成）"],
+        ["车间东出口（合成）"],
+        ["厂区环网消火栓（合成）"],
+        ["自动喷水灭火系统（合成）", "调漆间气体灭火系统（合成）"],
+    ),
 }
+
+DEVICE_POINTS_PATH = Path(__file__).resolve().parents[2] / "demo-data" / "device_points.csv"
+
+
+def load_device_points(path=DEVICE_POINTS_PATH):
+    path = Path(path)
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
 
 ENTERPRISE_COLUMNS = """id, name, industry, district, building, health_score, risk_level,
 online_rate, open_hazards, pending_signal_count, fault_count_30d, maintenance_overdue,
@@ -131,11 +233,16 @@ last_seen_at, updated_at"""
 
 def serialize_row(row):
     data = dict(row)
-    for key in ("last_seen_at", "updated_at", "occurred_at", "created_at"):
+    for key in (
+        "last_seen_at", "updated_at", "occurred_at", "created_at",
+        "due_at", "dispatched_at", "approved_at",
+    ):
         if isinstance(data.get(key), datetime):
             data[key] = data[key].isoformat()
     if "online_rate" in data:
         data["online_rate"] = float(data["online_rate"])
+    if "confidence" in data and data["confidence"] is not None:
+        data["confidence"] = float(data["confidence"])
     return data
 
 
@@ -151,8 +258,12 @@ class PostgresRepository:
         async with await self._connect() as connection:
             await connection.execute(CREATE_ENTERPRISES_SQL)
             await connection.execute(CREATE_EVENTS_SQL)
+            await connection.execute(MIGRATE_EVENT_TYPES_SQL)
             await connection.execute(INCIDENT_SCHEMA_SQL)
+            await connection.execute(CREATE_DEVICE_POINTS_SQL)
             await connection.execute(CREATE_COPILOT_RUNS_SQL)
+            await connection.execute(CREATE_FINDINGS_WORKORDERS_SQL)
+            await connection.execute(MIGRATE_OPS_EVENT_ID_SQL)
             async with connection.cursor() as cursor:
                 await cursor.executemany(
                     """INSERT INTO enterprises (
@@ -174,6 +285,17 @@ class PostgresRepository:
                     VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (enterprise_id) DO NOTHING""",
                     [(enterprise_id, address, Jsonb(hazards), Jsonb(access), Jsonb(water), Jsonb(facilities))
                      for enterprise_id, (address, hazards, access, water, facilities) in SEED_PROFILES.items()],
+                )
+                await cursor.executemany(
+                    """INSERT INTO device_points
+                    (point_id, enterprise_id, controller_no, loop_no, point_no,
+                     device_type_code, device_type, location, protect_target)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (point_id) DO NOTHING""",
+                    [(row["point_id"], row["enterprise_id"], int(row["controller_no"]),
+                      int(row["loop_no"]), int(row["point_no"]), int(row["device_type_code"]),
+                      row["device_type"], row["location"], row.get("protect_target", ""))
+                     for row in load_device_points()],
                 )
             await connection.execute(
                 """INSERT INTO signal_verifications (monitoring_event_id)
@@ -245,6 +367,21 @@ class PostgresRepository:
                     """INSERT INTO signal_verifications (monitoring_event_id)
                     VALUES (%s) ON CONFLICT (monitoring_event_id) DO NOTHING""",
                     (event["id"],),
+                )
+            if data["event_type"] == "fault":
+                # 故障进入统一工单中枢：自动生成维修草稿，供维保组/Copilot 确认派发。
+                location = (data.get("payload") or {}).get("location") or "未知点位"
+                await connection.execute(
+                    """INSERT INTO ops_workorders (
+                        kind, enterprise_id, event_id, crew_id, owner, summary, status, evidence_refs
+                    ) VALUES (
+                        'repair', %s, %s, 'crew-wb-01', '维保组带班员', %s, 'draft', %s
+                    )""",
+                    (
+                        data["enterprise_id"], event["id"],
+                        f"设施故障待诊断：{location}（事件 #{event['id']}）",
+                        [f"monitoring_events/{event['id']}"],
+                    ),
                 )
         result = serialize_row(event)
         result["enterprise"] = await self.get_enterprise(data["enterprise_id"])
@@ -344,6 +481,39 @@ class PostgresRepository:
         result["raw_ref"] = f"monitoring_events/{row['id']}"
         return result
 
+    async def get_device_point(self, controller_no, loop_no, point_no):
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                """SELECT point_id, enterprise_id, controller_no, loop_no, point_no,
+                    device_type_code, device_type, location, protect_target
+                FROM device_points
+                WHERE controller_no = %s AND loop_no = %s AND point_no = %s""",
+                (controller_no, loop_no, point_no),
+            )).fetchone()
+        return serialize_row(row) if row else None
+
+    async def get_controller_area(self, controller_no):
+        """机号 -> 该主机所辖厂区单元（用于主机自身故障等无点位事件）。"""
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                """SELECT enterprise_id, COUNT(*) AS point_count FROM device_points
+                WHERE controller_no = %s GROUP BY enterprise_id
+                ORDER BY point_count DESC LIMIT 1""",
+                (controller_no,),
+            )).fetchone()
+        return row["enterprise_id"] if row else None
+
+    async def list_device_points(self, enterprise_id):
+        async with await self._connect() as connection:
+            rows = await (await connection.execute(
+                """SELECT point_id, enterprise_id, controller_no, loop_no, point_no,
+                    device_type_code, device_type, location, protect_target
+                FROM device_points WHERE enterprise_id = %s
+                ORDER BY controller_no, loop_no, point_no""",
+                (enterprise_id,),
+            )).fetchall()
+        return [serialize_row(row) for row in rows]
+
     async def get_site_profile(self, enterprise_id):
         async with await self._connect() as connection:
             row = await (await connection.execute(
@@ -412,7 +582,7 @@ class PostgresRepository:
             )).fetchone()
         return serialize_row(row) if row else None
 
-    async def add_copilot_approval(self, run_id, action, note, actor="总队值班员（模拟）"):
+    async def add_copilot_approval(self, run_id, action, note, actor="消控室值班员（模拟）"):
         async with await self._connect() as connection:
             row = await (await connection.execute(
                 """UPDATE copilot_runs SET approvals = array_append(approvals, %s)
@@ -476,7 +646,7 @@ class PostgresRepository:
                 )).fetchone()
                 await connection.execute(
                     """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                    VALUES (%s, %s, 'incident_created', '总队值班员（模拟）', %s)
+                    VALUES (%s, %s, 'incident_created', '消控室值班员（模拟）', %s)
                     ON CONFLICT (event_key) DO NOTHING""",
                     (incident_row["id"], f"incident:{incident_row['id']}:created", note),
                 )
@@ -519,7 +689,7 @@ class PostgresRepository:
             await connection.execute("UPDATE fire_stations SET status = 'awaiting_ack' WHERE id = %s", (station_id,))
             await connection.execute(
                 """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                VALUES (%s, %s, 'dispatch_issued', '总队值班员（模拟）', %s)""",
+                VALUES (%s, %s, 'dispatch_issued', '消控室值班员（模拟）', %s)""",
                 (incident_id, f"incident:{incident_id}:dispatch-issued", station["name"]),
             )
         return {"changed": True, **await self._dispatch_result(incident_id, dispatch["id"], station_id)}
@@ -555,7 +725,7 @@ class PostgresRepository:
             await connection.execute("UPDATE fire_stations SET status = %s WHERE id = %s", (station_status_for_dispatch(target), ids["station_id"]))
             await connection.execute(
                 """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                VALUES (%s, %s, %s, '消防救援站通信员（模拟）', %s)""",
+                VALUES (%s, %s, %s, '处置班组带班员（模拟）', %s)""",
                 (ids["incident_id"], f"incident:{ids['incident_id']}:{target}", target, note),
             )
         return {"changed": True, **await self._dispatch_result(ids["incident_id"], dispatch_id, ids["station_id"])}
@@ -582,8 +752,384 @@ class PostgresRepository:
             )).fetchone()
             await connection.execute(
                 """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                VALUES (%s, %s, 'first_report', '消防救援站通信员（模拟）', %s)""",
+                VALUES (%s, %s, 'first_report', '处置班组带班员（模拟）', %s)""",
                 (dispatch["incident_id"], f"incident:{dispatch['incident_id']}:first-report", situation),
             )
             detail = await self._incident_detail(connection, dispatch["incident_id"])
         return {"changed": True, "incident": detail, "report": serialize_row(report)}
+
+    async def create_inspection_finding(self, data):
+        due_at = data.get("due_at") or (datetime.now(timezone.utc) + timedelta(days=7))
+        async with await self._connect() as connection:
+            enterprise = await (await connection.execute(
+                "SELECT id FROM enterprises WHERE id = %s", (data["enterprise_id"],)
+            )).fetchone()
+            if not enterprise:
+                return None
+            row = await (await connection.execute(
+                """INSERT INTO inspection_findings (
+                    enterprise_id, title, category, severity, location, description,
+                    department, owner, image_asset, voice_text, confidence, status,
+                    pin, evidence_refs, due_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                ) RETURNING *""",
+                (
+                    data["enterprise_id"], data["title"], data.get("category", ""),
+                    data.get("severity", "medium"), data.get("location", ""),
+                    data.get("description", ""), data.get("department", ""),
+                    data.get("owner", ""), data.get("image_asset", ""),
+                    data.get("voice_text", ""), data.get("confidence", 0),
+                    data.get("status", "draft"), Jsonb(data.get("pin") or {}),
+                    data.get("evidence_refs") or [], due_at,
+                ),
+            )).fetchone()
+        return serialize_row(row)
+
+    async def list_inspection_findings(self, enterprise_id=None):
+        async with await self._connect() as connection:
+            if enterprise_id:
+                rows = await (await connection.execute(
+                    """SELECT * FROM inspection_findings WHERE enterprise_id = %s
+                    ORDER BY created_at DESC, id DESC""",
+                    (enterprise_id,),
+                )).fetchall()
+            else:
+                rows = await (await connection.execute(
+                    "SELECT * FROM inspection_findings ORDER BY created_at DESC, id DESC"
+                )).fetchall()
+        return [serialize_row(row) for row in rows]
+
+    async def get_inspection_finding(self, finding_id):
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                "SELECT * FROM inspection_findings WHERE id = %s", (finding_id,)
+            )).fetchone()
+        return serialize_row(row) if row else None
+
+    async def dispatch_inspection_finding(self, finding_id, note=""):
+        async with await self._connect() as connection:
+            finding = await (await connection.execute(
+                "SELECT * FROM inspection_findings WHERE id = %s FOR UPDATE", (finding_id,)
+            )).fetchone()
+            if not finding:
+                return None
+            if finding["status"] == "assigned":
+                workorder = await (await connection.execute(
+                    "SELECT * FROM ops_workorders WHERE finding_id = %s ORDER BY id DESC LIMIT 1",
+                    (finding_id,),
+                )).fetchone()
+                return {
+                    "changed": False,
+                    "finding": serialize_row(finding),
+                    "workorder": serialize_row(workorder) if workorder else None,
+                }
+            if finding["status"] not in ("draft",):
+                raise ValueError("finding_state_conflict")
+            finding = await (await connection.execute(
+                """UPDATE inspection_findings
+                SET status = 'assigned', dispatched_at = NOW()
+                WHERE id = %s RETURNING *""",
+                (finding_id,),
+            )).fetchone()
+            await connection.execute(
+                """UPDATE enterprises SET open_hazards = open_hazards + 1, updated_at = NOW()
+                WHERE id = %s""",
+                (finding["enterprise_id"],),
+            )
+            summary = (
+                f"巡查隐患整改：{finding['title']} @ {finding['location']}。"
+                f"责任人 {finding['owner']}（{finding['department']}）。{note}".strip()
+            )
+            workorder = await (await connection.execute(
+                """INSERT INTO ops_workorders (
+                    kind, enterprise_id, finding_id, owner, summary, status, evidence_refs, approved_at
+                ) VALUES ('rectification', %s, %s, %s, %s, 'approved', %s, NOW())
+                RETURNING *""",
+                (
+                    finding["enterprise_id"], finding_id, finding["owner"], summary,
+                    finding["evidence_refs"] or [],
+                ),
+            )).fetchone()
+        return {
+            "changed": True,
+            "finding": serialize_row(finding),
+            "workorder": serialize_row(workorder),
+        }
+
+    async def create_ops_workorder(self, data):
+        kind = data.get("kind") or "maintenance"
+        status = data.get("status") or "draft"
+        async with await self._connect() as connection:
+            enterprise = await (await connection.execute(
+                "SELECT id FROM enterprises WHERE id = %s", (data["enterprise_id"],)
+            )).fetchone()
+            if not enterprise:
+                return None
+            row = await (await connection.execute(
+                """INSERT INTO ops_workorders (
+                    kind, enterprise_id, finding_id, event_id, maintenance_id, crew_id,
+                    owner, summary, status, evidence_refs, approved_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *""",
+                (
+                    kind, data["enterprise_id"], data.get("finding_id"), data.get("event_id"),
+                    data.get("maintenance_id"), data.get("crew_id", "crew-wb-01"),
+                    data.get("owner", "维保组带班员"), data["summary"], status,
+                    data.get("evidence_refs") or [],
+                    datetime.now(timezone.utc) if status == "approved" else None,
+                ),
+            )).fetchone()
+        return serialize_row(row)
+
+    async def create_maintenance_workorder(self, data):
+        payload = {**data, "kind": data.get("kind") or "maintenance"}
+        return await self.create_ops_workorder(payload)
+
+    async def get_workorder_by_event(self, event_id):
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                """SELECT * FROM ops_workorders WHERE event_id = %s
+                ORDER BY id DESC LIMIT 1""",
+                (event_id,),
+            )).fetchone()
+        return serialize_row(row) if row else None
+
+    async def get_workbench_inbox(self, role="crew", crew_id=None, owner=None):
+        """聚合处置派单 + ops 工单，供值班台/班组/网格责任人统一收件箱。"""
+        items = []
+        async with await self._connect() as connection:
+            if role in ("crew", "duty"):
+                dispatch_sql = """
+                    SELECT d.id AS dispatch_id, d.incident_id, d.station_id AS crew_id,
+                        d.status AS dispatch_status, d.issued_at, i.enterprise_id,
+                        e.name AS enterprise_name, s.name AS crew_name
+                    FROM incident_dispatches d
+                    JOIN fire_incidents i ON i.id = d.incident_id
+                    JOIN enterprises e ON e.id = i.enterprise_id
+                    JOIN fire_stations s ON s.id = d.station_id
+                """
+                params = []
+                if role == "crew" and crew_id:
+                    dispatch_sql += " WHERE d.station_id = %s"
+                    params.append(crew_id)
+                dispatch_sql += " ORDER BY d.issued_at DESC, d.id DESC"
+                for row in await (await connection.execute(dispatch_sql, params)).fetchall():
+                    items.append({
+                        "inbox_id": f"dispatch-{row['dispatch_id']}",
+                        "source": "incident_dispatch",
+                        "kind": "response",
+                        "status": row["dispatch_status"],
+                        "enterprise_id": row["enterprise_id"],
+                        "enterprise_name": row["enterprise_name"],
+                        "crew_id": row["crew_id"],
+                        "crew_name": row["crew_name"],
+                        "owner": "",
+                        "summary": f"处置事件 #{row['incident_id']} 派发至 {row['crew_name']}",
+                        "incident_id": row["incident_id"],
+                        "dispatch_id": row["dispatch_id"],
+                        "event_id": None,
+                        "workorder_id": None,
+                        "created_at": row["issued_at"].isoformat() if isinstance(row["issued_at"], datetime) else row["issued_at"],
+                    })
+
+            wo_clauses, wo_params = [], []
+            if role == "crew" and crew_id:
+                wo_clauses.append("w.crew_id = %s")
+                wo_params.append(crew_id)
+                wo_clauses.append("w.kind IN ('maintenance', 'repair')")
+                wo_clauses.append("w.status IN ('draft', 'approved', 'in_progress')")
+            elif role == "owner":
+                if owner:
+                    wo_clauses.append("w.owner = %s")
+                    wo_params.append(owner)
+                wo_clauses.append("w.kind = 'rectification'")
+                wo_clauses.append("w.status IN ('approved', 'in_progress')")
+            elif role == "duty":
+                wo_clauses.append("w.status IN ('draft', 'approved', 'in_progress')")
+            where = f"WHERE {' AND '.join(wo_clauses)}" if wo_clauses else ""
+            rows = await (await connection.execute(
+                f"""SELECT w.*, e.name AS enterprise_name
+                FROM ops_workorders w
+                JOIN enterprises e ON e.id = w.enterprise_id
+                {where}
+                ORDER BY w.created_at DESC, w.id DESC""",
+                wo_params,
+            )).fetchall()
+            for row in rows:
+                items.append({
+                    "inbox_id": f"workorder-{row['id']}",
+                    "source": "ops_workorder",
+                    "kind": row["kind"],
+                    "status": row["status"],
+                    "enterprise_id": row["enterprise_id"],
+                    "enterprise_name": row["enterprise_name"],
+                    "crew_id": row["crew_id"],
+                    "crew_name": row["crew_id"] or "",
+                    "owner": row["owner"],
+                    "summary": row["summary"],
+                    "incident_id": None,
+                    "dispatch_id": None,
+                    "event_id": row["event_id"],
+                    "finding_id": row["finding_id"],
+                    "workorder_id": row["id"],
+                    "created_at": row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else row["created_at"],
+                })
+
+            stations = await (await connection.execute(
+                "SELECT id, name, district, status, crew_count, vehicle_count FROM fire_stations ORDER BY id"
+            )).fetchall()
+            pending_signals = []
+            if role == "duty":
+                pending_signals = [serialize_row(row) for row in await (await connection.execute(
+                    """SELECT v.id, m.id AS monitoring_event_id, m.enterprise_id,
+                        e.name AS enterprise_name, m.event_type, m.severity, m.occurred_at,
+                        v.status AS verification_status
+                    FROM signal_verifications v
+                    JOIN monitoring_events m ON m.id = v.monitoring_event_id
+                    JOIN enterprises e ON e.id = m.enterprise_id
+                    WHERE v.status = 'pending'
+                    ORDER BY m.occurred_at DESC, m.id DESC"""
+                )).fetchall()]
+
+        items.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        return {
+            "role": role,
+            "crew_id": crew_id,
+            "owner": owner,
+            "items": items,
+            "stations": [serialize_row(row) for row in stations],
+            "pending_signals": pending_signals,
+        }
+
+    async def approve_workorder(self, workorder_id, note=""):
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                "SELECT * FROM ops_workorders WHERE id = %s FOR UPDATE", (workorder_id,)
+            )).fetchone()
+            if not row:
+                return None
+            if row["status"] == "approved":
+                return {"changed": False, "workorder": serialize_row(row)}
+            if row["status"] != "draft":
+                raise ValueError("workorder_state_conflict")
+            summary = row["summary"] if not note else f"{row['summary']}；审批备注：{note}"
+            updated = await (await connection.execute(
+                """UPDATE ops_workorders
+                SET status = 'approved', approved_at = NOW(), summary = %s
+                WHERE id = %s RETURNING *""",
+                (summary, workorder_id),
+            )).fetchone()
+        return {"changed": True, "workorder": serialize_row(updated)}
+
+    async def start_workorder(self, workorder_id, note=""):
+        """人工确认后开始执行：approved → in_progress。"""
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                "SELECT * FROM ops_workorders WHERE id = %s FOR UPDATE", (workorder_id,)
+            )).fetchone()
+            if not row:
+                return None
+            if row["status"] == "in_progress":
+                return {"changed": False, "workorder": serialize_row(row)}
+            if row["status"] != "approved":
+                raise ValueError("workorder_state_conflict")
+            summary = row["summary"] if not note else f"{row['summary']}；开工备注：{note}"
+            updated = await (await connection.execute(
+                """UPDATE ops_workorders SET status = 'in_progress', summary = %s
+                WHERE id = %s RETURNING *""",
+                (summary, workorder_id),
+            )).fetchone()
+        return {"changed": True, "workorder": serialize_row(updated)}
+
+    async def complete_workorder(self, workorder_id, note=""):
+        """维保/整改人工核验完成：approved|in_progress → done（不自动关闭巡查隐患，需复查）。"""
+        async with await self._connect() as connection:
+            row = await (await connection.execute(
+                "SELECT * FROM ops_workorders WHERE id = %s FOR UPDATE", (workorder_id,)
+            )).fetchone()
+            if not row:
+                return None
+            if row["status"] == "done":
+                return {"changed": False, "workorder": serialize_row(row)}
+            if row["status"] not in ("approved", "in_progress"):
+                raise ValueError("workorder_state_conflict")
+            summary = row["summary"] if not note else f"{row['summary']}；完成核验：{note}"
+            updated = await (await connection.execute(
+                """UPDATE ops_workorders SET status = 'done', summary = %s
+                WHERE id = %s RETURNING *""",
+                (summary, workorder_id),
+            )).fetchone()
+        return {"changed": True, "workorder": serialize_row(updated)}
+
+    async def recheck_inspection_finding(self, finding_id, result="passed", note=""):
+        """巡查复查：整改工单完成后关闭隐患；未通过则保持 assigned 并附注。"""
+        async with await self._connect() as connection:
+            finding = await (await connection.execute(
+                "SELECT * FROM inspection_findings WHERE id = %s FOR UPDATE", (finding_id,)
+            )).fetchone()
+            if not finding:
+                return None
+            if finding["status"] == "closed":
+                workorder = await (await connection.execute(
+                    "SELECT * FROM ops_workorders WHERE finding_id = %s ORDER BY id DESC LIMIT 1",
+                    (finding_id,),
+                )).fetchone()
+                return {
+                    "changed": False,
+                    "finding": serialize_row(finding),
+                    "workorder": serialize_row(workorder) if workorder else None,
+                }
+            if finding["status"] not in ("assigned", "in_progress"):
+                raise ValueError("finding_state_conflict")
+            workorder = await (await connection.execute(
+                "SELECT * FROM ops_workorders WHERE finding_id = %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                (finding_id,),
+            )).fetchone()
+            if result == "failed":
+                desc = finding["description"] or ""
+                suffix = note or "复查未通过，继续整改"
+                updated = await (await connection.execute(
+                    """UPDATE inspection_findings
+                    SET description = %s WHERE id = %s RETURNING *""",
+                    (f"{desc}；复查未通过：{suffix}".strip("；"), finding_id),
+                )).fetchone()
+                return {
+                    "changed": True,
+                    "finding": serialize_row(updated),
+                    "workorder": serialize_row(workorder) if workorder else None,
+                    "recheck_result": "failed",
+                }
+            updated = await (await connection.execute(
+                """UPDATE inspection_findings SET status = 'closed' WHERE id = %s RETURNING *""",
+                (finding_id,),
+            )).fetchone()
+            if workorder and workorder["status"] != "done":
+                wo_summary = workorder["summary"] if not note else f"{workorder['summary']}；复查通过：{note}"
+                workorder = await (await connection.execute(
+                    """UPDATE ops_workorders SET status = 'done', summary = %s
+                    WHERE id = %s RETURNING *""",
+                    (wo_summary, workorder["id"]),
+                )).fetchone()
+            return {
+                "changed": True,
+                "finding": serialize_row(updated),
+                "workorder": serialize_row(workorder) if workorder else None,
+                "recheck_result": "passed",
+            }
+
+    async def list_workorders(self, enterprise_id=None, status=None):
+        clauses, params = [], []
+        if enterprise_id:
+            clauses.append("enterprise_id = %s")
+            params.append(enterprise_id)
+        if status:
+            clauses.append("status = %s")
+            params.append(status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        async with await self._connect() as connection:
+            rows = await (await connection.execute(
+                f"SELECT * FROM ops_workorders {where} ORDER BY created_at DESC, id DESC",
+                params,
+            )).fetchall()
+        return [serialize_row(row) for row in rows]

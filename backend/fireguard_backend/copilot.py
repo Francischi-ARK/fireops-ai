@@ -24,15 +24,18 @@ SCENARIOS_PATH = Path(__file__).resolve().parents[2] / "demo-data" / "copilot_sc
 TEMPLATE_MODEL_NAME = "deterministic-template"
 
 SYSTEM_PROMPT = (
-    "你是 FireGuard 消防协同 Copilot，处理合成演示数据。只输出 JSON，字段："
-    "intent(signal_verification|incident_dispatch_support|unknown), missing_fields[], plan[], "
-    "tool_calls[{name,arguments}], evidence[{ref,kind}], draft_outputs{}, risks[], "
-    "approval_required[], abstained(bool)。"
+    "你是工厂消防设备运维 Copilot（FireOps），服务新能源汽车工厂的消控室值班员、"
+    "维保工程师与网格责任人，处理合成演示数据。只输出 JSON，字段："
+    "intent(signal_verification|incident_response_support|fault_diagnosis|unknown), "
+    "missing_fields[], plan[], tool_calls[{name,arguments}], evidence[{ref,kind}], "
+    "draft_outputs{}, risks[], approval_required[], abstained(bool)。"
     "可用工具：get_signal_context(event_id), get_site_packet(enterprise_id), "
     "get_maintenance_context(enterprise_id), find_missing_fields(reporter_text,known_fields), "
-    "create_verification_draft(event_id,note), recommend_station(enterprise_id), "
-    "create_dispatch_draft(incident_id,station_id), build_role_brief(incident_id,role)。"
-    "规则：不编造证据编号，证据只能引用工具返回过的 ref；核实、调派等高风险动作只生成草稿；"
+    "create_verification_draft(event_id,note), search_manual(query,limit), "
+    "recommend_crew(enterprise_id), create_workorder_draft(crew_id,incident_id,event_id,summary), "
+    "build_role_brief(incident_id,role)。"
+    "规则：不编造证据编号，证据只能引用工具返回过的 ref；诊断结论必须附说明书或维保记录依据；"
+    "核实、工单派发等高风险动作只生成草稿，绝不自动启动灭火装置或对外报警；"
     "信息不足时 abstained=true 并在 missing_fields 列出缺口。"
 )
 
@@ -123,6 +126,7 @@ class CopilotEngine:
         signal = await self.provider.get_signal(ctx.event_id)
         if not signal:
             return
+        ctx.event_type = signal.get("event_type", "")
         ctx.verification_status = signal.get("verification_status", "pending")
         if ctx.verification_status == "confirmed" and ctx.incident_id is None:
             incident = await self.provider.get_incident_by_event(ctx.event_id)
@@ -177,61 +181,111 @@ class CopilotEngine:
         text = create.reporter_text or scenario["input"]["reporter_text"]
         approved = scenario["human_approval_points"]
 
-        if sid == "C-insufficient-data-safe-abstention":
+        if sid == "D-insufficient-data-safe-abstention":
             return AgentPlan(
                 intent="signal_verification",
                 missing_fields=list(scenario["expected_missing_fields"]),
-                plan=["读取信号上下文", "读取企业档案", "列出信息缺口并转人工"],
+                plan=["读取信号上下文", "读取厂区单元档案", "列出信息缺口并转人工"],
                 tool_calls=[
                     ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
                     ToolCall(name="get_site_packet", arguments={"enterprise_id": create.enterprise_id}),
                     ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
                 ],
-                risks=["企业数据长期断报，上报信息模糊", "不满足任何处置建议的证据门槛"],
+                risks=["冲压车间网关长期断报，上报信息模糊", "不满足任何处置建议的证据门槛"],
                 abstained=True,
             )
 
-        if sid == "A-false-alarm-maintenance-adjacent":
+        if sid == "A-false-alarm-paint-shop":
             return AgentPlan(
                 intent="signal_verification",
                 missing_fields=list(scenario["expected_missing_fields"]),
-                plan=["读取信号上下文", "比对维保记录", "生成待核实草稿"],
+                plan=["解析报警帧并定位点位", "比对当日维保测试记录", "生成待核实草稿"],
                 tool_calls=[
                     ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
                     ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
                     ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
                     ToolCall(name="create_verification_draft", arguments={
-                        "event_id": create.event_id, "note": "报警与当月维保测试时间相邻，疑似测试引起，需现场核实"}),
+                        "event_id": create.event_id,
+                        "note": "报警与当日回路测试时间相邻且现场反馈无烟雾，疑似测试或粉尘引起，需现场核实"}),
                 ],
-                risks=["信号与维保测试时间相邻，存在误报可能"],
+                risks=["报警与维保测试时间相邻，存在误报可能", "喷涂粉尘作业可能污染探测器"],
+                approval_required=list(approved),
+            )
+
+        if sid == "C-controller-fault-diagnosis":
+            crew_id = scenario["expected_outputs"]["recommended_crew_ids"][0]
+            return AgentPlan(
+                intent="fault_diagnosis",
+                missing_fields=list(scenario["expected_missing_fields"]),
+                plan=[
+                    "解析故障帧并定位主机",
+                    "检索说明书故障处理指引",
+                    "比对维保记录（备电检查逾期、电池超期）",
+                    "生成维修工单草稿（待人工派发）",
+                ],
+                tool_calls=[
+                    ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
+                    ToolCall(name="search_manual", arguments={"query": "备电故障 蓄电池 更换", "limit": 3}),
+                    ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
+                    ToolCall(name="recommend_crew", arguments={"enterprise_id": create.enterprise_id}),
+                    ToolCall(name="create_workorder_draft", arguments={
+                        "crew_id": crew_id, "event_id": create.event_id,
+                        "summary": "机2主机备电故障：先检查电池连接器与接线；结合停电史与更换记录（2023-06），"
+                                   "疑似蓄电池老化，建议充电8小时复测，仍报障则更换电池（说明书 kb-002）"}),
+                ],
+                risks=["备电失效期间主电停电将导致主机断电", "故障超过24小时未消除须上报消防安全责任人"],
+                approval_required=list(approved),
+            )
+
+        if sid == "E-gas-release-delay-advisory":
+            return AgentPlan(
+                intent="gas_release_advisory",
+                missing_fields=list(scenario["expected_missing_fields"]),
+                plan=[
+                    "解析气体启动延时事件帧并定位保护区",
+                    "检索说明书紧急停动与火警处理流程",
+                    "对照维保/检修安全条款生成值班咨询卡（不执行任何控制）",
+                ],
+                tool_calls=[
+                    ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
+                    ToolCall(name="get_site_packet", arguments={"enterprise_id": create.enterprise_id}),
+                    ToolCall(name="search_manual", arguments={"query": "气体灭火 延时 紧急停动", "limit": 3}),
+                    ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
+                    ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
+                ],
+                risks=[
+                    "延时阶段可紧急停动；电磁阀已输出后停动无效",
+                    "Agent 不得远程启停气体灭火装置，任何停动由现场人工执行",
+                ],
                 approval_required=list(approved),
             )
 
         # B: confirmed fire. Phase one stops at verification; after a human
-        # confirms, the same run continues to dispatch draft and role briefs.
+        # confirms, the same run continues to workorder draft and role briefs.
         calls = [
             ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
             ToolCall(name="get_site_packet", arguments={"enterprise_id": create.enterprise_id}),
             ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
             ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
             ToolCall(name="create_verification_draft", arguments={
-                "event_id": create.event_id, "note": "多点证据一致，建议立即核实并准备调派"}),
-            ToolCall(name="recommend_station", arguments={"enterprise_id": create.enterprise_id}),
+                "event_id": create.event_id, "note": "感烟+手报两点报警且人工确认，建议立即核实并准备先期处置"}),
+            ToolCall(name="recommend_crew", arguments={"enterprise_id": create.enterprise_id}),
         ]
-        steps = ["读取信号与场地证据", "生成事件简报", "推荐辖区首战站点"]
+        steps = ["解析报警帧与点位档案", "汇集车间危险源与处置资源", "推荐片区处置班组"]
         if ctx.verification_status == "confirmed" and ctx.incident_id is not None:
-            station_id = scenario["expected_outputs"]["recommended_station_ids"][0]
-            calls.append(ToolCall(name="create_dispatch_draft", arguments={
-                "incident_id": ctx.incident_id, "station_id": station_id}))
-            for role in ("commander", "station", "enterprise"):
+            crew_id = scenario["expected_outputs"]["recommended_crew_ids"][0]
+            calls.append(ToolCall(name="create_workorder_draft", arguments={
+                "crew_id": crew_id, "incident_id": ctx.incident_id,
+                "summary": "PACK 缓存区确认火警：微型消防站先期处置，值班负责人组织疏散并拨打119"}))
+            for role in ("duty_officer", "responder", "area_owner"):
                 calls.append(ToolCall(name="build_role_brief", arguments={
                     "incident_id": ctx.incident_id, "role": role}))
-            steps += ["生成调派草稿（待人工下达）", "生成指挥台/站端/企业端三份交付"]
+            steps += ["生成处置单草稿（待人工派发）", "生成值班台/处置班组/网格责任人三份交付"]
         return AgentPlan(
-            intent="incident_dispatch_support",
+            intent="incident_response_support",
             missing_fields=list(scenario["expected_missing_fields"]),
             plan=steps,
             tool_calls=calls,
-            risks=["有人员失联报告", "涉锂电池危险源"],
+            risks=["有人员未确认撤出", "涉锂电池模组半成品，存在复燃与热失控风险"],
             approval_required=list(approved),
         )

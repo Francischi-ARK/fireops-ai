@@ -54,7 +54,7 @@ class FakeCopilotEngine:
 RUN_PAYLOAD = {
     "enterprise_id": "ent-001", "event_id": 1,
     "reporter_text": "控制室上报（合成）",
-    "scenario_id": "A-false-alarm-maintenance-adjacent", "mode": "scenario",
+    "scenario_id": "A-false-alarm-paint-shop", "mode": "scenario",
 }
 
 
@@ -100,7 +100,7 @@ class CopilotApiTests(unittest.TestCase):
 
     def test_missing_run_is_404(self):
         self.assertEqual(self.client.get("/copilot/runs/999").status_code, 404)
-        response = self.client.post("/copilot/runs/999/approve", json={"action": "dispatch_order"})
+        response = self.client.post("/copilot/runs/999/approve", json={"action": "workorder_dispatch"})
         self.assertEqual(response.status_code, 404)
 
 
