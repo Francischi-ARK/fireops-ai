@@ -131,6 +131,17 @@ let planZoom = 1;
 let toastTimer;
 let workflowStarted = false;
 const MONITORING_API_BASE = window.FIREGUARD_API_BASE || "http://127.0.0.1:8000";
+const OFFLINE_JUDGE_SCENARIO = {
+  scenario_id: "B-confirmed-fire-battery-workorder",
+  title: "确认火警：电池车间 PACK 缓存区两点报警",
+  enterprise_id: "ent-001",
+  input: {
+    signal: { event_type: "fire_alarm", severity: "critical", payload: { device_ref: "pt-02-01-005", location: "电池车间 PACK 半成品缓存区" } },
+    reporter_text: "PACK 半成品缓存区冒烟并见明火，南门手报已按下，现场人员正在疏散。",
+    images: [{ asset: "assets/fire-floorplan.png", note: "电池车间平面图（合成）" }],
+  },
+  safe_failure: "Agent 只整理证据和起草处置建议；核实、派单与归档均由人确认。",
+};
 let demoActorId = localStorage.getItem("fireops-demo-actor") || "duty-demo";
 const actorHeaders = () => ({ "Content-Type": "application/json", "X-FireOps-Actor": demoActorId });
 const DEMO_INSPECT_ASSETS = [
@@ -152,7 +163,7 @@ let copilotState = {
   scenarios: null, selectedId: null, mode: "scenario",
   phase: "select", eventId: null, run: null, verification: null, dispatch: null, busy: false,
   verificationActor: null, dispatchActor: null,
-  judgeMode: false, judgeProgress: [],
+  judgeMode: false, judgeProgress: [], offline: false,
   bindSource: "scenario", // scenario | hub
   hubEventId: null,
   hubEnterpriseId: null,
@@ -1348,6 +1359,7 @@ function bindDynamicActions() {
     else if (action === "run") runCopilotScenario();
     else if (action === "reset") resetCopilot();
     else if (action === "dispatch") confirmCopilotDispatch();
+    else if (action === "offline-archive") archiveOfflineJudgeDemo();
     else if (action === "export-audit") exportCopilotAuditPack();
   }));
   app.querySelectorAll("[data-copilot-verify]").forEach((button) => button.addEventListener("click", () => {
@@ -1882,6 +1894,42 @@ window.addEventListener("fireguard:enterprise-selected", (event) => {
   renderRoute();
 });
 
+function buildOfflineCopilotRun(stage = "verification") {
+  const evidence = [
+    { ref: "monitoring_events/OFFLINE-001", kind: "signal", note: "合成 Modbus 报警帧" },
+    { ref: "pt-02-01-005", kind: "point", note: "电池车间 PACK 缓存区烟感" },
+    { ref: "demo/manual/fire-alarm-01", kind: "knowledge", note: "火警核实与先期处置流程" },
+    { ref: "crew-wx-01", kind: "crew", note: "微型消防站·西区站（虚拟）" },
+  ];
+  const trace = [
+    { name: "get_signal_context", ok: true, data: { verification_status: stage === "verification" ? "pending" : "confirmed" }, evidence_refs: [evidence[0].ref, evidence[1].ref] },
+    { name: "get_site_packet", ok: true, data: {}, evidence_refs: ["ent-001"] },
+    { name: "get_maintenance_context", ok: true, data: {}, evidence_refs: ["demo/maintenance/pack-01"] },
+    { name: "find_missing_fields", ok: true, data: { missing_fields: ["未撤出人员最后位置"] }, evidence_refs: [] },
+  ];
+  if (stage === "verification") {
+    trace.push({ name: "create_verification_draft", ok: true, data: { note: "两点报警并有人工见明火报告，建议立即现场核实。", status: "awaiting_human_verification" }, evidence_refs: [evidence[0].ref] });
+  } else {
+    trace.push(
+      { name: "recommend_crew", ok: true, data: { recommended: [{ id: "crew-wx-01" }] }, evidence_refs: ["crew-wx-01"] },
+      { name: "create_workorder_draft", ok: true, data: { crew_id: "crew-wx-01", summary: "确认火警先期处置：核查人员撤离、控制火势并回传首报" }, evidence_refs: [evidence[0].ref, "crew-wx-01"] },
+      ...["duty_officer", "responder", "area_owner"].map((role) => ({
+        name: "build_role_brief", ok: true, data: { role, incident: { response_brief: { address: "电池车间 PACK 半成品缓存区", items: [{ text: "按岗位核对事件、人员与处置状态" }], disclaimer: "合成演示，不控制真实设备" } } }, evidence_refs: ["OFFLINE-INC-001"],
+      })),
+    );
+  }
+  return {
+    run_id: "OFFLINE-001", mode: "scenario", model_name: "deterministic-template",
+    fallback_reason: "公开静态演示：未连接后端", incident_id: stage === "dispatch" ? "OFFLINE-INC-001" : null,
+    plan: {
+      intent: "incident_response_support", abstained: false,
+      plan: ["解析报警帧并定位点位", "汇总现场、设备与制度证据", "生成待人工确认的处置草稿"],
+      missing_fields: ["未撤出人员最后位置"], risks: ["锂电池模组半成品存在复燃风险", "严禁 AI 自动启动灭火或对外报警"], evidence,
+    },
+    rejected_evidence: [], trace,
+  };
+}
+
 function selectedCopilotScenario() {
   return copilotState.scenarios?.find((item) => item.scenario_id === copilotState.selectedId) || copilotState.scenarios?.[0] || null;
 }
@@ -1903,10 +1951,13 @@ async function loadCopilotScenarios() {
     const response = await fetch(`${MONITORING_API_BASE}/copilot/scenarios`);
     if (!response.ok) throw new Error("scenarios_unavailable");
     const payload = await response.json();
+    copilotState.offline = false;
     copilotState.scenarios = payload.scenarios || [];
     copilotState.selectedId ||= copilotState.scenarios[0]?.scenario_id || null;
   } catch {
-    copilotState.scenarios = [];
+    copilotState.offline = true;
+    copilotState.scenarios = [OFFLINE_JUDGE_SCENARIO];
+    copilotState.selectedId = OFFLINE_JUDGE_SCENARIO.scenario_id;
   }
   if ((location.hash || "").startsWith("#/copilot")) renderRoute();
 }
@@ -1937,6 +1988,19 @@ async function runCopilotScenario() {
   const scenario = selectedCopilotScenario();
   if (!scenario || copilotState.busy) return;
   setDemoActor("duty-demo");
+  if (copilotState.offline) {
+    copilotState.busy = true;
+    renderRoute();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    copilotState.eventId = "OFFLINE-001";
+    copilotState.run = buildOfflineCopilotRun("verification");
+    copilotState.verification = null;
+    copilotState.dispatch = null;
+    copilotState.phase = "verification";
+    copilotState.busy = false;
+    renderRoute();
+    return;
+  }
   copilotState.busy = true;
   renderRoute();
   try {
@@ -1982,7 +2046,7 @@ async function startJudgeDemo() {
   if (copilotState.busy) return;
   const scenario = copilotState.scenarios?.find((item) => item.scenario_id === "B-confirmed-fire-battery-workorder");
   if (!scenario) return showToast("评委演示场景尚未加载");
-  const station = incidentBackend.stations.find((item) => item.id === "crew-wx-01");
+  const station = copilotState.offline ? null : incidentBackend.stations.find((item) => item.id === "crew-wx-01");
   if (station && station.status !== "available") return showToast("西区班组正在执行其他任务，请先到流程监管完成该任务");
   resetCopilot();
   copilotState.judgeMode = true;
@@ -1996,6 +2060,14 @@ async function startJudgeDemo() {
 async function confirmCopilotVerification(result) {
   const scenario = selectedCopilotScenario();
   if (!scenario || !copilotState.run || copilotState.busy) return;
+  if (copilotState.offline) {
+    copilotState.verification = result;
+    copilotState.verificationActor = demoActorId;
+    copilotState.run = result === "confirmed" ? buildOfflineCopilotRun("dispatch") : copilotState.run;
+    copilotState.phase = result === "confirmed" ? "dispatch" : "closed";
+    renderRoute();
+    return;
+  }
   copilotState.busy = true;
   try {
     await copilotPost(`/signals/${copilotState.eventId}/verification`, { result, note: "Copilot 演示中的人工确认" });
@@ -2044,6 +2116,14 @@ async function confirmCopilotDispatch() {
   const run = copilotState.run;
   const draft = run?.trace.find((entry) => entry.name === "create_workorder_draft" && entry.ok);
   if (!draft || copilotState.busy) return;
+  if (copilotState.offline) {
+    copilotState.dispatch = draft.data.crew_id;
+    copilotState.dispatchActor = demoActorId;
+    copilotState.phase = copilotState.judgeMode ? "crew_simulation" : "done";
+    renderRoute();
+    if (copilotState.judgeMode) await runJudgeCrewSimulation();
+    return;
+  }
   copilotState.busy = true;
   let autoSimulate = false;
   try {
@@ -2087,6 +2167,23 @@ async function confirmCopilotDispatch() {
 }
 
 async function runJudgeCrewSimulation() {
+  if (copilotState.offline) {
+    copilotState.phase = "crew_simulation";
+    copilotState.busy = true;
+    copilotState.judgeProgress = [];
+    setDemoActor("crew-demo");
+    renderRoute();
+    for (const label of ["班组已签收", "班组已出动", "班组已到场", "现场反馈已回传"]) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      copilotState.judgeProgress.push(label);
+      renderRoute();
+    }
+    setDemoActor("duty-demo");
+    copilotState.phase = "archive";
+    copilotState.busy = false;
+    renderRoute();
+    return;
+  }
   const incidentId = copilotState.run?.incident_id;
   if (!incidentId || copilotState.busy) return;
   copilotState.phase = "crew_simulation";
@@ -2122,6 +2219,13 @@ async function runJudgeCrewSimulation() {
     copilotState.busy = false;
     if ((location.hash || "").startsWith("#/copilot")) renderRoute();
   }
+}
+
+function archiveOfflineJudgeDemo() {
+  copilotState.phase = "archived";
+  copilotState.judgeProgress.push("值班员已核验归档");
+  renderRoute();
+  showToast("离线评委演示已完成，事件证据链可导出");
 }
 
 function resetCopilot() {
@@ -2194,9 +2298,14 @@ function copilotTemplate() {
           <span class="copilot-badge"><i data-lucide="shield-check"></i>AI 不替代现场处置决策</span>
         </div>
       </header>
-      <a class="copilot-workflow-jump" href="#/workflow"><span><i data-lucide="route"></i>流程监管</span><strong>${incidentBackend.incidents.filter((incident) => incident.status !== "closed").length} 个进行中事件</strong><small>查看当前步骤、责任角色和下一动作</small><i data-lucide="arrow-right"></i></a>
+      ${copilotState.offline ? `
+        <div class="copilot-offline-banner" role="status">
+          <span><i data-lucide="wifi-off"></i>离线评委演示</span>
+          <strong>无需启动后端，点击下方按钮即可走完三个人工闸门。</strong>
+          <small>数据和工具轨迹均为固定合成回放；连接真实后端后会自动切回数据库流程。</small>
+        </div>
+      ` : `<a class="copilot-workflow-jump" href="#/workflow"><span><i data-lucide="route"></i>流程监管</span><strong>${incidentBackend.incidents.filter((incident) => incident.status !== "closed").length} 个进行中事件</strong><small>查看当前步骤、责任角色和下一动作</small><i data-lucide="arrow-right"></i></a>`}
       ${copilotState.scenarios === null ? `<div class="copilot-empty">正在加载演示场景…</div>` : ""}
-      ${Array.isArray(copilotState.scenarios) && copilotState.scenarios.length === 0 ? `<div class="copilot-empty">无法连接后端（${MONITORING_API_BASE}），请先启动后端服务。</div>` : ""}
       ${scenario ? copilotSelectTemplate(scenario) : ""}
       ${copilotState.run ? copilotRunTemplate() : ""}
     </section>
@@ -2233,11 +2342,11 @@ function copilotSelectTemplate(scenario) {
       <div class="copilot-input">
         <div class="copilot-mode" role="group" aria-label="信号来源">
           <button type="button" class="${copilotState.bindSource !== "hub" ? "active" : ""}" data-copilot-bind="scenario">独立场景<small>新建演示信号</small></button>
-          <button type="button" class="${copilotState.bindSource === "hub" ? "active" : ""}" data-copilot-bind="hub">中枢信号<small>接监测/核实台</small></button>
+          <button type="button" class="${copilotState.bindSource === "hub" ? "active" : ""}" data-copilot-bind="hub" ${copilotState.offline ? "disabled" : ""}>中枢信号<small>${copilotState.offline ? "需连接后端" : "接监测/核实台"}</small></button>
         </div>
         <div class="copilot-mode" role="group" aria-label="运行模式">
           <button type="button" class="${copilotState.mode === "scenario" ? "active" : ""}" data-copilot-mode="scenario">场景回放<small>离线可复现</small></button>
-          <button type="button" class="${copilotState.mode === "live" ? "active" : ""}" data-copilot-mode="live">Live 模型<small>失败自动回退</small></button>
+          <button type="button" class="${copilotState.mode === "live" ? "active" : ""}" data-copilot-mode="live" ${copilotState.offline ? "disabled" : ""}>Live 模型<small>${copilotState.offline ? "需连接后端" : "失败自动回退"}</small></button>
         </div>
         ${copilotState.bindSource === "hub" ? `
           <div class="copilot-report">
@@ -2277,6 +2386,7 @@ function copilotRunTemplate() {
   return `
     <div class="copilot-result">
       <div class="copilot-status-strip">
+        ${copilotState.offline ? `<span class="copilot-badge copilot-offline-badge"><i data-lucide="wifi-off"></i>离线合成回放</span>` : ""}
         <span class="copilot-badge">${run.mode === "live" ? "Live 模式" : "场景回放"}</span>
         <span class="copilot-badge">模型：${escapeHtml(run.model_name)}</span>
         ${run.fallback_reason ? `<span class="copilot-badge copilot-badge-warn">模型不可用，已回退模板（${escapeHtml(run.fallback_reason)}）</span>` : ""}
@@ -2344,6 +2454,25 @@ function copilotBriefsTemplate(briefs) {
 
 function copilotPhaseTemplate() {
   const run = copilotState.run;
+  if (copilotState.phase === "archive") {
+    return `
+      <section class="copilot-panel copilot-approval">
+        <div class="judge-gate"><b>人工闸门 3/3</b><span>班组已回传现场结果，最终归档仍由消控室值班员确认。</span></div>
+        <h2><i data-lucide="archive"></i>人工确认 · 核验反馈并归档</h2>
+        <p>现场反馈：明火已扑灭，人员已全部撤离；事件、工单、班组反馈和时间戳已汇总。</p>
+        <small>离线演示只记录在当前浏览器，不写入真实数据库。</small>
+        <div class="copilot-actions"><button type="button" class="primary-action" data-copilot-action="offline-archive"><i data-lucide="check-check"></i>核验反馈并归档</button></div>
+      </section>`;
+  }
+  if (copilotState.phase === "archived") {
+    return `
+      <section class="copilot-panel copilot-done offline-demo-complete">
+        <span>DEMO COMPLETE</span><h2><i data-lucide="badge-check"></i>离线评委演示已闭环</h2>
+        <p>同一事件已完成：AI 研判 → 人工核实 → 人工派单 → 班组反馈 → 人工归档。</p>
+        <ol>${copilotState.judgeProgress.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
+        <div class="copilot-actions"><button type="button" class="secondary-action" data-copilot-action="export-audit"><i data-lucide="download"></i>导出审计包</button><button type="button" class="primary-action" data-copilot-action="reset"><i data-lucide="rotate-ccw"></i>重新演示</button></div>
+      </section>`;
+  }
   if (copilotState.phase === "abstained") {
     return `
       <section class="copilot-panel copilot-abstain">

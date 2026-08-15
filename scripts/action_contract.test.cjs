@@ -43,6 +43,10 @@ assert.match(
   /async function runJudgeCrewSimulation\(\)[\s\S]*?"acknowledge"[\s\S]*?"depart"[\s\S]*?"arrive"[\s\S]*?\/report/,
   "judge demo must show crew acknowledgement, departure, arrival and field report",
 );
+assert.match(source, /copilotState\.offline = true/, "backend failure must enable offline judge mode");
+assert.match(source, /function buildOfflineCopilotRun\(/, "offline judge mode needs a local auditable run");
+assert.match(source, /data-copilot-action="offline-archive"/, "offline judge flow needs its third human gate");
+assert.match(source, /action === "offline-archive"[\s\S]*?archiveOfflineJudgeDemo\(\)/, "offline archive gate is not handled");
 
 const buttons = [...source.matchAll(/<button\b([^>]*)>/g)].map((match) => match[1]);
 const unexplained = buttons.filter((attrs) =>

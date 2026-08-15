@@ -4,6 +4,10 @@
 
 FireOps AI 把火警主机 Modbus 事件、点位编码、维保记录、说明书和巡查隐患接入同一个事件与工单中枢。Agent 负责理解任务、补齐上下文、检索证据、诊断和起草；火警核实、工单派发、开工、完工和复查由人确认。
 
+**在线评委演示：** [https://francischi-ark.github.io/fireops-ai/#/copilot](https://francischi-ark.github.io/fireops-ai/#/copilot)
+
+公开页面无需后端即可运行固定合成场景；本地启动完整服务后会自动切换到数据库工作流。
+
 ![FireOps AI 标志](assets/fireops-logo.svg)
 
 ## 为什么它不是普通告警大屏
