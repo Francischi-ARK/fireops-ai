@@ -28,6 +28,23 @@ broker = EventBroker()
 incident_broker = EventBroker()
 copilot_engine = CopilotEngine(CopilotProvider(repository), OpenAICompatibleClient())
 
+DEMO_ACTORS = {
+    "duty-demo": {"id": "duty-demo", "role": "duty", "label": "消控室值班员（演示）"},
+    "crew-demo": {"id": "crew-demo", "role": "crew", "label": "处置/维保班组（演示）"},
+    "owner-demo": {"id": "owner-demo", "role": "owner", "label": "网格责任人（演示）"},
+    "inspector-demo": {"id": "inspector-demo", "role": "inspector", "label": "防火巡查员（演示）"},
+    "ehs-demo": {"id": "ehs-demo", "role": "ehs", "label": "EHS 经理（演示）"},
+}
+
+
+def require_actor(request: Request, allowed_roles):
+    actor = DEMO_ACTORS.get(request.headers.get("X-FireOps-Actor", ""))
+    if actor is None:
+        raise HTTPException(status_code=401, detail="actor_required")
+    if actor["role"] not in allowed_roles:
+        raise HTTPException(status_code=403, detail="role_not_allowed")
+    return actor
+
 
 MonitoringEventType = Literal[
     "fire_alarm", "fault", "start", "stop", "isolate", "release", "supervise",
@@ -76,6 +93,10 @@ class DispatchReportRequest(BaseModel):
     people_status: Literal["unknown", "no_risk", "at_risk"]
 
 
+class IncidentCloseRequest(BaseModel):
+    note: str = Field(default="现场反馈已核验，人工归档", max_length=300)
+
+
 class CopilotApprovalRequest(BaseModel):
     action: Literal["verification_result", "workorder_dispatch"]
     note: str = Field(default="", max_length=300)
@@ -92,6 +113,7 @@ class InspectionAnalyzeRequest(BaseModel):
     enterprise_id: str = Field(min_length=1, max_length=80)
     image_asset: str = Field(default="", max_length=300)
     voice_text: str = Field(default="", max_length=500)
+    mode: Literal["scenario", "live"] = "scenario"
 
 
 class InspectionFindingCreate(BaseModel):
@@ -102,6 +124,7 @@ class InspectionFindingCreate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=800)
     owner: Optional[str] = Field(default=None, max_length=80)
     department: Optional[str] = Field(default=None, max_length=80)
+    mode: Literal["scenario", "live"] = "scenario"
 
 
 class InspectionDispatchRequest(BaseModel):
@@ -133,7 +156,7 @@ INCIDENT_ERROR_STATUS = {
     "verification_conflict": 409, "dispatch_conflict": 409,
     "incident_state_conflict": 409, "station_busy": 409,
     "invalid_transition": 409, "report_conflict": 409,
-    "report_before_arrival": 409,
+    "report_before_arrival": 409, "close_before_report": 409,
 }
 
 
@@ -170,7 +193,7 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-FireOps-Actor"],
 )
 
 
@@ -198,10 +221,18 @@ async def monitoring_enterprises():
 
 @app.get("/enterprises/{enterprise_id}")
 async def enterprise_detail(enterprise_id: str):
-    enterprise = await repository.get_enterprise(enterprise_id)
-    if not enterprise:
+    dossier = await repository.get_enterprise_dossier(enterprise_id)
+    if not dossier:
         raise HTTPException(status_code=404, detail="enterprise_not_found")
-    return enterprise
+    maintenance = await CopilotProvider(repository).get_maintenance(enterprise_id)
+    dossier["maintenance_records"] = maintenance
+    evidence_refs = [
+        *dossier["evidence_refs"],
+        *(row.get("maintenance_id") for row in maintenance),
+        *(row.get("raw_ref") for row in maintenance),
+    ]
+    dossier["evidence_refs"] = list(dict.fromkeys(ref for ref in evidence_refs if ref))
+    return simulation_payload(**dossier)
 
 
 async def _publish_event(event):
@@ -309,34 +340,47 @@ async def station_tasks(station_id: str):
 
 
 @app.post("/signals/{event_id}/verification")
-async def verify_signal(event_id: int, payload: VerificationRequest):
+async def verify_signal(event_id: int, payload: VerificationRequest, request: Request):
+    actor = require_actor(request, {"duty", "ehs"})
     return await incident_action(
-        repository.verify_signal(event_id, payload.result, payload.note),
+        repository.verify_signal(event_id, payload.result, payload.note, actor["label"]),
         f"verification_{payload.result}", event_id,
     )
 
 
 @app.post("/incidents/{incident_id}/dispatch")
-async def dispatch_incident(incident_id: int, payload: DispatchRequest):
+async def dispatch_incident(incident_id: int, payload: DispatchRequest, request: Request):
+    actor = require_actor(request, {"duty", "ehs"})
     return await incident_action(
-        repository.dispatch_incident(incident_id, payload.station_id),
+        repository.dispatch_incident(incident_id, payload.station_id, actor["label"]),
         "dispatch_issued", incident_id,
     )
 
 
 @app.post("/dispatches/{dispatch_id}/transition")
-async def transition_dispatch(dispatch_id: int, payload: DispatchTransitionRequest):
+async def transition_dispatch(dispatch_id: int, payload: DispatchTransitionRequest, request: Request):
+    actor = require_actor(request, {"crew", "ehs"})
     return await incident_action(
-        repository.transition_dispatch(dispatch_id, payload.action, payload.note),
+        repository.transition_dispatch(dispatch_id, payload.action, payload.note, actor["label"]),
         payload.action, dispatch_id,
     )
 
 
 @app.post("/dispatches/{dispatch_id}/report")
-async def create_dispatch_report(dispatch_id: int, payload: DispatchReportRequest):
+async def create_dispatch_report(dispatch_id: int, payload: DispatchReportRequest, request: Request):
+    actor = require_actor(request, {"crew", "ehs"})
     return await incident_action(
-        repository.add_dispatch_report(dispatch_id, payload.situation, payload.people_status),
+        repository.add_dispatch_report(dispatch_id, payload.situation, payload.people_status, actor["label"]),
         "first_report", dispatch_id,
+    )
+
+
+@app.post("/incidents/{incident_id}/close")
+async def close_incident(incident_id: int, payload: IncidentCloseRequest, request: Request):
+    actor = require_actor(request, {"duty", "ehs"})
+    return await incident_action(
+        repository.close_incident(incident_id, payload.note, actor["label"]),
+        "incident_closed", incident_id,
     )
 
 
@@ -359,8 +403,9 @@ async def get_copilot_run(run_id: int):
 
 
 @app.post("/copilot/runs/{run_id}/approve")
-async def approve_copilot_run(run_id: int, payload: CopilotApprovalRequest):
-    result = await repository.add_copilot_approval(run_id, payload.action, payload.note)
+async def approve_copilot_run(run_id: int, payload: CopilotApprovalRequest, request: Request):
+    actor = require_actor(request, {"duty", "ehs"})
+    result = await repository.add_copilot_approval(run_id, payload.action, payload.note, actor["label"])
     if result is None:
         raise HTTPException(status_code=404, detail="copilot_run_not_found")
     return simulation_payload(**result)
@@ -378,13 +423,18 @@ async def inspection_demo_assets():
 
 @app.post("/inspection/analyze")
 async def inspection_analyze(payload: InspectionAnalyzeRequest):
-    draft = analyze_inspection(payload.enterprise_id, payload.image_asset, payload.voice_text)
+    draft = analyze_inspection(
+        payload.enterprise_id, payload.image_asset, payload.voice_text, mode=payload.mode,
+    )
     return simulation_payload(draft=draft)
 
 
 @app.post("/inspection/findings", status_code=201)
-async def create_inspection_finding(payload: InspectionFindingCreate):
-    draft = analyze_inspection(payload.enterprise_id, payload.image_asset, payload.voice_text)
+async def create_inspection_finding(payload: InspectionFindingCreate, request: Request):
+    require_actor(request, {"inspector", "ehs"})
+    draft = analyze_inspection(
+        payload.enterprise_id, payload.image_asset, payload.voice_text, mode=payload.mode,
+    )
     if draft["abstained"] and not payload.title:
         raise HTTPException(status_code=422, detail="recognition_abstained")
     finding = await repository.create_inspection_finding({
@@ -415,7 +465,8 @@ async def list_inspection_findings(enterprise_id: Optional[str] = None):
 
 
 @app.post("/inspection/findings/{finding_id}/dispatch")
-async def dispatch_inspection_finding(finding_id: int, payload: InspectionDispatchRequest):
+async def dispatch_inspection_finding(finding_id: int, payload: InspectionDispatchRequest, request: Request):
+    require_actor(request, {"inspector", "ehs"})
     try:
         result = await repository.dispatch_inspection_finding(finding_id, payload.note)
     except ValueError as error:
@@ -426,7 +477,8 @@ async def dispatch_inspection_finding(finding_id: int, payload: InspectionDispat
 
 
 @app.post("/inspection/findings/{finding_id}/recheck")
-async def recheck_inspection_finding(finding_id: int, payload: InspectionRecheckRequest):
+async def recheck_inspection_finding(finding_id: int, payload: InspectionRecheckRequest, request: Request):
+    require_actor(request, {"inspector", "ehs"})
     try:
         result = await repository.recheck_inspection_finding(
             finding_id, result=payload.result, note=payload.note,
@@ -439,7 +491,8 @@ async def recheck_inspection_finding(finding_id: int, payload: InspectionRecheck
 
 
 @app.post("/maintenance/overdue-scan")
-async def maintenance_overdue_scan(payload: MaintenanceScanRequest):
+async def maintenance_overdue_scan(payload: MaintenanceScanRequest, request: Request):
+    require_actor(request, {"inspector", "ehs"})
     provider = CopilotProvider(repository)
     rows = await provider.get_maintenance(payload.enterprise_id) if payload.enterprise_id else []
     if not payload.enterprise_id:
@@ -469,7 +522,8 @@ async def list_workorders(enterprise_id: Optional[str] = None, status: Optional[
 
 
 @app.post("/workorders/{workorder_id}/approve")
-async def approve_workorder(workorder_id: int, payload: WorkorderApproveRequest):
+async def approve_workorder(workorder_id: int, payload: WorkorderApproveRequest, request: Request):
+    require_actor(request, {"duty", "inspector", "ehs"})
     try:
         result = await repository.approve_workorder(workorder_id, payload.note)
     except ValueError as error:
@@ -480,7 +534,8 @@ async def approve_workorder(workorder_id: int, payload: WorkorderApproveRequest)
 
 
 @app.post("/workorders/{workorder_id}/start")
-async def start_workorder(workorder_id: int, payload: WorkorderCompleteRequest):
+async def start_workorder(workorder_id: int, payload: WorkorderCompleteRequest, request: Request):
+    require_actor(request, {"crew", "owner", "ehs"})
     try:
         result = await repository.start_workorder(workorder_id, payload.note)
     except ValueError as error:
@@ -491,7 +546,8 @@ async def start_workorder(workorder_id: int, payload: WorkorderCompleteRequest):
 
 
 @app.post("/workorders/{workorder_id}/complete")
-async def complete_workorder(workorder_id: int, payload: WorkorderCompleteRequest):
+async def complete_workorder(workorder_id: int, payload: WorkorderCompleteRequest, request: Request):
+    require_actor(request, {"crew", "owner", "ehs"})
     try:
         result = await repository.complete_workorder(workorder_id, payload.note)
     except ValueError as error:
@@ -514,7 +570,8 @@ class OpsWorkorderCreate(BaseModel):
 
 
 @app.post("/workorders", status_code=201)
-async def create_workorder(payload: OpsWorkorderCreate):
+async def create_workorder(payload: OpsWorkorderCreate, request: Request):
+    require_actor(request, {"duty", "ehs"})
     workorder = await repository.create_ops_workorder(payload.model_dump())
     if not workorder:
         raise HTTPException(status_code=404, detail="enterprise_not_found")

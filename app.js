@@ -115,6 +115,13 @@ const monitoringProfiles = {
   "ent-003": { district: "东区", online: "99%", signal: "无未核实火警信号", fault: "设备故障 1 次", maintenance: "维保计划正常", freshness: "1 分钟前" },
   "ent-004": { district: "西区", online: "62%", signal: "数据不足", fault: "网关断报，3 个数据域缺失", maintenance: "维保数据未接入", freshness: "30 小时前" },
 };
+const monitoringFloorPositions = {
+  "ent-001": { left: 50, top: 73, label: "电池测试工位" },
+  "ent-005": { left: 25, top: 31, label: "喷漆线 3#" },
+  "ent-002": { left: 51, top: 31, label: "测试区 B2" },
+  "ent-003": { left: 30, top: 70, label: "堆垛机通道" },
+  "ent-004": { left: 75, top: 70, label: "冲压线控制柜" },
+};
 
 let selectedCompanyId = "ent-001";
 let selectedIssueId = "hazard-01";
@@ -124,6 +131,8 @@ let planZoom = 1;
 let toastTimer;
 let workflowStarted = false;
 const MONITORING_API_BASE = window.FIREGUARD_API_BASE || "http://127.0.0.1:8000";
+let demoActorId = localStorage.getItem("fireops-demo-actor") || "duty-demo";
+const actorHeaders = () => ({ "Content-Type": "application/json", "X-FireOps-Actor": demoActorId });
 const DEMO_INSPECT_ASSETS = [
   "assets/evidence-extinguisher-blocked.png",
   "assets/evidence-exit-sign-fault.png",
@@ -142,6 +151,8 @@ let maintenanceDrafts = [];
 let copilotState = {
   scenarios: null, selectedId: null, mode: "scenario",
   phase: "select", eventId: null, run: null, verification: null, dispatch: null, busy: false,
+  verificationActor: null, dispatchActor: null,
+  judgeMode: false, judgeProgress: [],
   bindSource: "scenario", // scenario | hub
   hubEventId: null,
   hubEnterpriseId: null,
@@ -163,6 +174,8 @@ let selectedStationTaskId = null;
 let selectedInboxId = null;
 let terminalStationId = "crew-wx-01";
 let terminalOwnerName = "张伟";
+let enterpriseDossierState = { id: null, data: null, loading: false, error: "" };
+let threeDFallbackTimer = null;
 const CREW_OPTIONS = [
   { id: "crew-wx-01", label: "微型消防站·西区（处置）" },
   { id: "crew-wb-01", label: "消防设施维保组（维修/维保）" },
@@ -209,6 +222,44 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
   toastTimer = setTimeout(() => toast.classList.remove("show"), 2300);
+}
+
+function setDemoActor(actorId) {
+  demoActorId = actorId;
+  localStorage.setItem("fireops-demo-actor", actorId);
+  const actorSelect = document.querySelector("#demo-actor");
+  if (actorSelect) actorSelect.value = actorId;
+}
+
+function routeHash(root, context = {}) {
+  const params = new URLSearchParams(Object.entries(context).filter(([, value]) => value !== null && value !== undefined && value !== ""));
+  return `#/${root}${params.size ? `?${params}` : ""}`;
+}
+
+function applyRouteContext(params) {
+  const enterpriseId = params.get("enterprise_id");
+  if (enterpriseId && companies.some((company) => company.id === enterpriseId)) selectedCompanyId = enterpriseId;
+  const eventId = Number(params.get("event_id"));
+  if (eventId) selectedSignalEventId = eventId;
+  const workorderId = Number(params.get("workorder_id"));
+  if (workorderId) selectedInboxId = `workorder-${workorderId}`;
+  const findingId = Number(params.get("finding_id"));
+  if (findingId) selectedIssueId = `finding-${findingId}`;
+  const incidentId = Number(params.get("incident_id"));
+  if (incidentId) selectedIncidentId = incidentId;
+  const crewId = params.get("crew_id");
+  if (crewId && CREW_OPTIONS.some((crew) => crew.id === crewId)) terminalStationId = crewId;
+}
+
+function enterpriseContext(extra = {}) {
+  const context = { enterprise_id: selectedCompanyId, ...extra };
+  const dossier = enterpriseDossierState.id === selectedCompanyId ? enterpriseDossierState.data : null;
+  return {
+    ...context,
+    event_id: context.event_id ?? dossier?.next_context?.event_id,
+    workorder_id: context.workorder_id ?? dossier?.next_context?.workorder_id,
+    finding_id: context.finding_id ?? dossier?.next_context?.finding_id,
+  };
 }
 
 function refreshIcons() {
@@ -309,7 +360,7 @@ async function postMonitoringEvent(eventType, successMessage) {
   try {
     const response = await fetch(`${MONITORING_API_BASE}/monitoring/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({
         enterprise_id: selectedCompanyId,
         event_type: eventType,
@@ -333,7 +384,7 @@ async function postDemoModbusFrame(frameHex, { jumpToVerify = true } = {}) {
   try {
     const response = await fetch(`${MONITORING_API_BASE}/gateway/modbus/frames`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({ frame_hex: hex, gateway_id: "ark-gw-demo" }),
     });
     if (!response.ok) throw new Error("gateway_ingest_failed");
@@ -346,13 +397,13 @@ async function postDemoModbusFrame(frameHex, { jumpToVerify = true } = {}) {
     if (eventType === "fire_alarm" && event.id && jumpToVerify) {
       selectedSignalEventId = event.id;
       showToast("火警已入待核实队列，正在打开核实台…");
-      location.hash = "#/incidents";
+      location.hash = routeHash("incidents", { enterprise_id: selectedCompanyId, event_id: event.id });
       scheduleIncidentRefresh();
     } else if (eventType === "fault" && event.id) {
       showToast("故障已生成维修工单草稿，可到班组终端（维保组）或 Copilot 确认派发");
       terminalStationId = "crew-wb-01";
       selectedInboxId = null;
-      location.hash = "#/station";
+      location.hash = routeHash("station", { enterprise_id: selectedCompanyId, event_id: event.id });
       scheduleIncidentRefresh();
     }
   } catch {
@@ -417,10 +468,10 @@ async function refreshIncidentBackend() {
     selectedIncidentId ||= incidentBackend.incidents[0]?.id || null;
     selectedStationTaskId ||= incidentBackend.tasks[0]?.id || null;
     selectedInboxId ||= incidentBackend.inbox[0]?.inbox_id || null;
-    if (["#/incidents", "#/station", "#/owner", "#/copilot"].some((route) => (location.hash || "").startsWith(route))) renderRoute();
+    if (["#/incidents", "#/station", "#/owner", "#/copilot", "#/workflow"].some((route) => (location.hash || "").startsWith(route))) renderRoute();
   } catch {
     incidentBackend.status = "offline";
-    if (["#/incidents", "#/station", "#/owner", "#/copilot"].some((route) => (location.hash || "").startsWith(route))) renderRoute();
+    if (["#/incidents", "#/station", "#/owner", "#/copilot", "#/workflow"].some((route) => (location.hash || "").startsWith(route))) renderRoute();
   }
 }
 
@@ -451,7 +502,7 @@ function stopIncidentBackend() {
 async function postIncidentAction(path, body, successMessage) {
   try {
     const response = await fetch(`${MONITORING_API_BASE}${path}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      method: "POST", headers: actorHeaders(), body: JSON.stringify(body),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || "incident_action_failed");
@@ -460,9 +511,18 @@ async function postIncidentAction(path, body, successMessage) {
     await refreshIncidentBackend();
     return payload;
   } catch (error) {
-    showToast(`操作未完成：${error.message}`);
+    showToast(`操作未完成：${incidentErrorMessage(error.message)}`);
     return null;
   }
+}
+
+function incidentErrorMessage(code) {
+  return {
+    station_busy: "处置班组正在执行其他任务，请到流程监管继续当前工单",
+    role_not_allowed: "当前身份无权执行此步骤，请按流程监管提示切换角色",
+    close_before_report: "班组尚未提交现场反馈，暂不能归档",
+    crew_unavailable: "当前没有可用的对应班组",
+  }[code] || code;
 }
 
 function timelineTemplate(incident) {
@@ -478,6 +538,13 @@ function incidentCommandTemplate() {
   const stations = incident
     ? incidentBackend.stations.filter((item) => item.district === incident.district && String(item.id).startsWith("crew-wx"))
     : [];
+  const availableStation = stations.find((item) => item.status === "available");
+  const occupiedStation = stations.find((item) => item.status !== "available");
+  const occupyingIncident = occupiedStation
+    ? incidentBackend.incidents.find((item) => item.dispatch?.station_id === occupiedStation.id && item.status !== "closed")
+    : null;
+  const workflowState = incident ? incidentWorkflowState(incident) : null;
+  const isJudgeIncident = copilotState.judgeMode && incident?.id === copilotState.run?.incident_id;
   const repairDrafts = incidentBackend.repairDrafts || [];
   return `
     <section class="incident-console" aria-labelledby="incident-console-title">
@@ -498,7 +565,10 @@ function incidentCommandTemplate() {
         </main>
         <aside class="incident-dispatch" aria-label="班组派单与时间线">
           <h2>片区处置力量</h2>
-          ${incident && !incident.dispatch ? `<select id="dispatch-station">${stations.map((item) => `<option value="${item.id}" ${item.status !== "available" ? "disabled" : ""}>${escapeHtml(item.name)} · ${window.FireGuardEngine.stationStatusLabel(item.status)}</option>`).join("")}</select><button type="button" class="dispatch-button" data-action="dispatch-incident">派发工单</button>` : incident?.dispatch ? `<div class="dispatch-card"><strong>${escapeHtml(incident.dispatch.station_name)}</strong><span>${window.FireGuardEngine.incidentStatusLabel(incident.status)}</span></div>` : `<div class="incident-empty">等待处置事件</div>`}
+          ${incident && !incident.dispatch ? availableStation
+            ? `<select id="dispatch-station">${stations.map((item) => `<option value="${item.id}" ${item.status !== "available" ? "disabled" : ""}>${escapeHtml(item.name)} · ${window.FireGuardEngine.stationStatusLabel(item.status)}</option>`).join("")}</select><button type="button" class="dispatch-button" data-action="dispatch-incident">派发工单</button>`
+            : `<div class="dispatch-card"><strong>当前片区班组正在执行${occupyingIncident ? `事件 #${occupyingIncident.id}` : "其他任务"}</strong><span>${escapeHtml(occupiedStation?.name || "处置班组")}释放后，本事件才能派发。</span></div>${workflowState?.crewId ? `<button type="button" class="dispatch-button" data-workflow-continue data-actor="${workflowState.actor}" data-crew-id="${workflowState.crewId}" data-route="${workflowState.route}">进入占用班组的当前任务</button>` : `<a class="workflow-inline-link" href="#/workflow">查看占用流程</a>`}`
+            : incident?.dispatch ? `<div class="dispatch-card"><strong>${escapeHtml(incident.dispatch.station_name)}</strong><span>${window.FireGuardEngine.incidentStatusLabel(incident.status)}</span></div>${incident.report && incident.status !== "closed" ? `${isJudgeIncident ? `<div class="judge-gate"><b>人工闸门 3/3</b><span>值班员核验现场反馈后归档，AI 不代替最终决定。</span></div>` : ""}<button type="button" class="dispatch-button" data-action="close-incident">核验反馈并归档</button>` : isJudgeIncident && incident.status === "closed" ? `<div class="judge-complete"><strong>评委演示闭环完成</strong><span>报警、证据、人工审批、班组反馈与归档均已写入审计时间线。</span></div>` : ""}` : `<div class="incident-empty">等待处置事件</div>`}
           <h2>事件时间线</h2>${timelineTemplate(incident)}
         </aside>
       </div>
@@ -546,10 +616,10 @@ function stationTerminalTemplate() {
             "也可在 Copilot 跑场景 B/C，派发后会跳转到本页",
           ]) : ""}
           ${selected?.source === "incident_dispatch" && task ? `
-            <div class="incident-title-row"><div><span>任务 #${task.dispatch.id}</span><h2>${escapeHtml(task.enterprise_name)}</h2><p>${escapeHtml(task.response_brief.address)}</p></div><strong>${window.FireGuardEngine.incidentStatusLabel(task.status)}</strong></div>
+            <div class="incident-title-row"><div><span>任务 #${task.dispatch.id}</span><h2>${escapeHtml(task.enterprise_name)}</h2><p>${escapeHtml(task.response_brief.address)}</p></div><strong>${task.report && task.status !== "closed" ? "待核验归档" : window.FireGuardEngine.incidentStatusLabel(task.status)}</strong></div>
             <section class="station-brief">${task.response_brief.items.map((item) => `<div><strong>${escapeHtml(item.text)}</strong><small>${escapeHtml(item.sources.join("、"))}</small></div>`).join("")}<p>${escapeHtml(task.response_brief.disclaimer)}</p></section>
             ${nextAction ? `<button type="button" class="station-action" data-action="station-next-action" data-next-action="${nextAction.action}">${nextAction.label}</button>` : ""}
-            ${task.dispatch.status === "arrived" && !task.report ? `<section class="first-report"><h3>现场处理反馈</h3><textarea id="report-situation" maxlength="300" placeholder="填写现场情况与处理结果（1–300 字）"></textarea><select id="report-people"><option value="unknown">人员情况未知</option><option value="no_risk">无被困风险</option><option value="at_risk">存在风险</option></select><button type="button" data-action="submit-first-report">提交反馈</button></section>` : task.report ? `<div class="report-received"><strong>现场反馈已提交</strong><span>${escapeHtml(task.report.situation)}</span></div>` : ""}
+            ${task.dispatch.status === "arrived" && !task.report ? `<section class="first-report"><h3>现场处理反馈</h3><textarea id="report-situation" maxlength="300" placeholder="填写现场情况与处理结果（1–300 字）"></textarea><select id="report-people"><option value="unknown">人员情况未知</option><option value="no_risk">无被困风险</option><option value="at_risk">存在风险</option></select><button type="button" data-action="submit-first-report">提交反馈</button></section>` : task.report && task.status !== "closed" ? `<div class="report-received"><strong>现场反馈已提交</strong><span>${escapeHtml(task.report.situation)} · 下一步由消控室值班员核验归档</span></div><button type="button" class="station-action" data-workflow-continue data-actor="duty-demo" data-incident-id="${task.id}" data-route="#/incidents?incident_id=${task.id}">交回消控室核验归档</button>` : task.report ? `<div class="report-received"><strong>事件已归档</strong><span>${escapeHtml(task.report.situation)}</span></div>` : ""}
           ` : ""}
           ${selected?.source === "ops_workorder" ? `
             <div class="incident-title-row"><div><span>OPS #${selected.workorder_id}</span><h2>${escapeHtml(selected.enterprise_name)}</h2><p>${kindLabel[selected.kind] || selected.kind}工单</p></div><strong>${escapeHtml(selected.status)}</strong></div>
@@ -557,7 +627,7 @@ function stationTerminalTemplate() {
             <p>来自统一工单中枢；草稿需人工确认后派发生效，完工需人工核验。</p></section>
             ${selected.status === "draft" ? `<button type="button" class="station-action" data-action="approve-inbox-workorder" data-workorder-id="${selected.workorder_id}">确认派发（人工）</button>` : ""}
             ${selected.status === "approved" ? `<button type="button" class="station-action" data-action="start-inbox-workorder" data-workorder-id="${selected.workorder_id}">开始处理</button>` : ""}
-            ${["approved", "in_progress"].includes(selected.status) ? `<button type="button" class="station-action" data-action="complete-inbox-workorder" data-workorder-id="${selected.workorder_id}">完成核验（人工）</button>` : ""}
+            ${selected.status === "in_progress" ? `<button type="button" class="station-action" data-action="complete-inbox-workorder" data-workorder-id="${selected.workorder_id}">完成核验（人工）</button>` : ""}
             ${!["draft", "approved", "in_progress"].includes(selected.status) ? `<div class="report-received"><strong>工单状态：${escapeHtml(selected.status)}</strong><span>本班组闭环完成</span></div>` : ""}
             ${selected.event_id ? `<button type="button" class="secondary-action" data-action="diagnose-event-copilot" data-event-id="${selected.event_id}" data-enterprise-id="${selected.enterprise_id}">用 Copilot 诊断此故障</button>` : ""}
           ` : ""}
@@ -609,7 +679,7 @@ function ownerInboxTemplate() {
             <section class="station-brief"><div><strong>${escapeHtml(selected.summary)}</strong><small>关联隐患 #${selected.finding_id || "—"}</small></div>
             <p>整改完成后标记完成；复查通过后隐患才正式关闭。</p></section>
             ${selected.status === "approved" ? `<button type="button" class="station-action" data-action="start-inbox-workorder" data-workorder-id="${selected.workorder_id}">开始整改</button>` : ""}
-            ${["approved", "in_progress"].includes(selected.status) ? `<button type="button" class="station-action" data-action="complete-inbox-workorder" data-workorder-id="${selected.workorder_id}">标记整改完成（待复查）</button>` : ""}
+            ${selected.status === "in_progress" ? `<button type="button" class="station-action" data-action="complete-inbox-workorder" data-workorder-id="${selected.workorder_id}">标记整改完成（待复查）</button>` : ""}
             ${selected.finding_id ? `<a class="secondary-action" href="#/inspections">去防火巡查发起复查</a>` : ""}
           `}
         </main>
@@ -632,6 +702,7 @@ function homeTemplate() {
       <ol class="hub-flow" aria-label="演示串联">
         <li><a href="#/monitoring">态势监测</a><span>看异常</span></li>
         <li><a href="#/incidents">报警核实</a><span>确认/排除</span></li>
+        <li><a href="#/workflow">流程监管</a><span>看当前责任与下一步</span></li>
         <li><a href="#/station">班组工单</a><span>处置/维修</span></li>
         <li><a href="#/inspections">防火巡查</a><span>派发整改</span></li>
         <li><a href="#/owner">网格待办</a><span>整改闭环</span></li>
@@ -674,11 +745,65 @@ function workspacePlaceholderTemplate(routeName) {
   `;
 }
 
+const INCIDENT_WORKFLOW_STEPS = ["信号接入", "人工核实", "派发处置单", "班组签收", "出动到场", "现场反馈", "人工归档"];
+
+function incidentWorkflowState(incident) {
+  const dispatchStatus = incident.dispatch?.status;
+  const responders = incidentBackend.stations.filter((station) => station.district === incident.district && String(station.id).startsWith("crew-wx"));
+  const available = responders.find((station) => station.status === "available");
+  if (incident.status === "closed" || dispatchStatus === "completed") return { current: 7, role: "已完成", action: "查看归档记录", actor: "duty-demo", route: `#/incidents?incident_id=${incident.id}` };
+  if (!incident.dispatch) {
+    if (!available && responders[0]) return { current: 2, role: "处置班组", action: "先完成占用班组的当前任务", actor: "crew-demo", crewId: responders[0].id, route: `#/station?crew_id=${responders[0].id}` };
+    return { current: 2, role: "消控室值班员", action: "选择处置站并派发", actor: "duty-demo", route: `#/incidents?incident_id=${incident.id}` };
+  }
+  if (dispatchStatus === "issued") return { current: 3, role: "处置班组", action: "签收任务", actor: "crew-demo", crewId: incident.dispatch.station_id, route: `#/station?crew_id=${incident.dispatch.station_id}` };
+  if (["acknowledged", "enroute"].includes(dispatchStatus)) return { current: 4, role: "处置班组", action: dispatchStatus === "acknowledged" ? "确认出动" : "确认到场", actor: "crew-demo", crewId: incident.dispatch.station_id, route: `#/station?crew_id=${incident.dispatch.station_id}` };
+  if (dispatchStatus === "arrived" && !incident.report) return { current: 5, role: "处置班组", action: "提交现场反馈", actor: "crew-demo", crewId: incident.dispatch.station_id, route: `#/station?crew_id=${incident.dispatch.station_id}` };
+  return { current: 6, role: "消控室值班员 / EHS", action: "核验反馈并归档", actor: "duty-demo", route: `#/incidents?incident_id=${incident.id}` };
+}
+
+function workflowStepsTemplate(current) {
+  return `<ol class="workflow-steps">${INCIDENT_WORKFLOW_STEPS.map((step, index) => {
+    const state = current >= INCIDENT_WORKFLOW_STEPS.length || index < current ? "done" : index === current ? "current" : "pending";
+    return `<li class="${state}"><span>${String(index + 1).padStart(2, "0")}</span><strong>${step}</strong></li>`;
+  }).join("")}</ol>`;
+}
+
+function workflowSupervisionTemplate() {
+  const incidents = [...incidentBackend.incidents].sort((a, b) => (a.status === "closed") - (b.status === "closed") || b.id - a.id);
+  const pendingSignals = incidentBackend.signals.filter((signal) => signal.verification_status === "pending");
+  const awaitingCrew = incidents.filter((incident) => ["issued", "acknowledged", "enroute", "arrived"].includes(incident.dispatch?.status) && !incident.report).length;
+  const awaitingClose = incidents.filter((incident) => incident.report && incident.status !== "closed").length;
+  return `
+    <section class="workflow-page" aria-labelledby="workflow-page-title">
+      <header class="workflow-page-header">
+        <div><span>OPERATIONS WORKFLOW / LIVE STATE</span><h1 id="workflow-page-title">事件流程监管</h1><p>事件到了哪一步、现在由谁负责、下一步做什么，都从数据库实时计算。</p></div>
+        <div class="incident-live ${incidentBackend.status}"><b></b>${incidentBackend.status === "live" ? "数据库实时同步" : "正在连接本地后端"}</div>
+      </header>
+      <div class="workflow-value-grid">
+        <article><span>AI 负责</span><strong>解析信号、补齐证据、生成核实与工单草稿</strong></article>
+        <article><span>人负责</span><strong>确认火情、批准派单、现场处置与最终归档</strong></article>
+        <article><span>监管负责</span><strong>追踪状态、责任角色、下一动作和审计时间线</strong></article>
+      </div>
+      <dl class="workflow-summary-strip"><div><dt>待核实</dt><dd>${pendingSignals.length}</dd></div><div><dt>待班组处理</dt><dd>${awaitingCrew}</dd></div><div><dt>待归档</dt><dd>${awaitingClose}</dd></div><div><dt>全部事件</dt><dd>${incidents.length}</dd></div></dl>
+      <div class="workflow-case-list">
+        ${pendingSignals.map((signal) => `<article class="workflow-case"><header><div><span>SIGNAL #${signal.monitoring_event_id}</span><h2>${escapeHtml(signal.enterprise_name)}</h2></div><b>待人工核实</b></header><ol class="workflow-steps"><li class="done"><span>01</span><strong>信号接入</strong></li><li class="current"><span>02</span><strong>人工核实</strong></li>${INCIDENT_WORKFLOW_STEPS.slice(2).map((step, index) => `<li class="pending"><span>${String(index + 3).padStart(2, "0")}</span><strong>${step}</strong></li>`).join("")}</ol><footer><p><span>当前责任</span><strong>消控室值班员</strong><small>下一步：确认火警或登记误报</small></p><button type="button" data-workflow-continue data-actor="duty-demo" data-route="#/incidents?event_id=${signal.monitoring_event_id}">去人工核实</button></footer></article>`).join("")}
+        ${incidents.map((incident) => {
+          const state = incidentWorkflowState(incident);
+          return `<article class="workflow-case ${incident.status === "closed" ? "closed" : ""}"><header><div><span>EVENT #${incident.id}</span><h2>${escapeHtml(incident.enterprise_name)}</h2><small>${escapeHtml(incident.district)} · ${escapeHtml(incident.response_brief.address)}</small></div><b>${window.FireGuardEngine.incidentStatusLabel(incident.status)}</b></header>${workflowStepsTemplate(state.current)}<footer><p><span>当前责任</span><strong>${state.role}</strong><small>下一步：${state.action}</small></p><button type="button" data-workflow-continue data-actor="${state.actor}" data-incident-id="${incident.id}" data-crew-id="${state.crewId || ""}" data-route="${state.route}">${state.action}</button></footer></article>`;
+        }).join("") || (pendingSignals.length ? "" : `<div class="workflow-empty">当前没有事件流程。请先从态势监测注入一条模拟火警帧。</div>`)}
+      </div>
+    </section>`;
+}
+
 function enterpriseDossierTemplate(enterpriseId) {
   const company = companies.find((item) => item.id === enterpriseId) || selectedCompany();
   const profile = monitoringProfiles[company.id] || {};
-  const companyIssues = allIssues().filter((issue) => !issue.enterpriseId || issue.enterpriseId === company.id).slice(0, 5);
-  const companyEquipment = equipment.slice(0, 5);
+  const dossier = enterpriseDossierState.id === company.id ? enterpriseDossierState.data : null;
+  const companyIssues = dossier?.findings || [];
+  const companyEquipment = dossier?.device_points || [];
+  const workorders = dossier?.workorders || [];
+  const events = dossier?.recent_events || [];
   return `
     <section class="enterprise-dossier" aria-labelledby="dossier-title">
       <header class="workspace-context-bar">
@@ -710,13 +835,26 @@ function enterpriseDossierTemplate(enterpriseId) {
         <article class="dossier-card">
           <h2>设备摘要</h2>
           <ul class="dossier-list">
-            ${companyEquipment.map((item) => `<li><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.location)} · ${escapeHtml(item.state)}</span></li>`).join("")}
+            ${companyEquipment.length ? companyEquipment.slice(0, 5).map((item) => `<li><strong>${escapeHtml(item.device_type || item.point_id)}</strong><span>${escapeHtml(item.location)} · 机${item.controller_no}回路${item.loop_no}点位${item.point_no}</span></li>`).join("") : `<li><strong>${enterpriseDossierState.loading ? "正在读取设备台账" : "设备台账暂不可用"}</strong><span>${escapeHtml(enterpriseDossierState.error || "等待后端连接")}</span></li>`}
           </ul>
         </article>
         <article class="dossier-card">
           <h2>隐患摘要</h2>
           <ul class="dossier-list">
-            ${companyIssues.length ? companyIssues.map((issue) => `<li><strong>${escapeHtml(issue.title)}</strong><span>${escapeHtml(issue.status)} · ${escapeHtml(issue.owner)}</span></li>`).join("") : "<li><strong>暂无本地隐患样例</strong><span>可从防火巡查新建</span></li>"}
+            ${companyIssues.length ? companyIssues.slice(0, 5).map((issue) => `<li><strong>${escapeHtml(issue.title)}</strong><span>#${issue.id} · ${escapeHtml(issue.status)} · ${escapeHtml(issue.owner)}</span></li>`).join("") : "<li><strong>暂无未闭环隐患</strong><span>可从防火巡查新建</span></li>"}
+          </ul>
+        </article>
+        <article class="dossier-card">
+          <h2>事件与工单</h2>
+          <ul class="dossier-list">
+            ${events.slice(0, 3).map((event) => `<li><strong>事件 #${event.id} · ${escapeHtml(event.event_type)}</strong><span>${escapeHtml(event.verification_status || "已入库")} · ${escapeHtml(event.raw_ref)}</span></li>`).join("") || "<li><strong>暂无事件</strong><span>可从态势监测注入演示帧</span></li>"}
+            ${workorders.slice(0, 3).map((workorder) => `<li><strong>工单 #${workorder.id} · ${escapeHtml(workorder.kind)}</strong><span>${escapeHtml(workorder.status)} · ${escapeHtml(workorder.summary)}</span></li>`).join("")}
+          </ul>
+        </article>
+        <article class="dossier-card">
+          <h2>审计证据</h2>
+          <ul class="dossier-list">
+            ${(dossier?.evidence_refs || []).slice(0, 6).map((ref) => `<li><strong>${escapeHtml(ref)}</strong><span>可回溯原始记录</span></li>`).join("") || "<li><strong>暂无证据引用</strong><span>业务操作后会自动汇总</span></li>"}
           </ul>
         </article>
         <article class="dossier-card dossier-actions">
@@ -728,14 +866,28 @@ function enterpriseDossierTemplate(enterpriseId) {
           </ol>
           <div class="dossier-cta-row">
             <button type="button" class="primary-action" data-action="verify-signal"><i data-lucide="shield-alert"></i>去人工核实</button>
-            <a class="secondary-action" href="#/inspections"><i data-lucide="clipboard-check"></i>去防火巡查</a>
-            <a class="secondary-action" href="#/station"><i data-lucide="siren"></i>去班组工单</a>
-            <a class="secondary-action" href="#/copilot"><i data-lucide="sparkles"></i>打开 Copilot</a>
+            <a class="secondary-action" href="${routeHash("inspections", enterpriseContext())}"><i data-lucide="clipboard-check"></i>去防火巡查</a>
+            <a class="secondary-action" href="${routeHash("station", enterpriseContext())}"><i data-lucide="siren"></i>去班组工单</a>
+            <a class="secondary-action" href="${routeHash("copilot", enterpriseContext())}"><i data-lucide="sparkles"></i>打开 Copilot</a>
           </div>
         </article>
       </div>
     </section>
   `;
+}
+
+async function loadEnterpriseDossier(enterpriseId) {
+  if (enterpriseDossierState.id === enterpriseId && (enterpriseDossierState.loading || enterpriseDossierState.data)) return;
+  enterpriseDossierState = { id: enterpriseId, data: null, loading: true, error: "" };
+  try {
+    const response = await fetch(`${MONITORING_API_BASE}/enterprises/${enterpriseId}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "dossier_unavailable");
+    enterpriseDossierState = { id: enterpriseId, data: payload, loading: false, error: "" };
+  } catch (error) {
+    enterpriseDossierState = { id: enterpriseId, data: null, loading: false, error: error.message };
+  }
+  if ((location.hash || "").startsWith(`#/enterprises/${enterpriseId}`)) renderRoute();
 }
 
 function guidedEmpty(title, steps) {
@@ -750,47 +902,49 @@ function guidedEmpty(title, steps) {
 function monitoringTemplate() {
   const company = selectedCompany();
   const profile = monitoringProfiles[company.id];
+  const floorPoint = monitoringFloorPositions[company.id];
   const summary = monitoringBackend.summary || { enterprise_count: 5, online_rate: 88, pending_signal_count: 4, maintenance_overdue: 4 };
   const queueCompanies = monitoringBackend.enterpriseIds.map((id) => companies.find((item) => item.id === id)).filter(Boolean);
   return `
     <section class="monitoring-page" aria-labelledby="monitoring-title">
-      <header class="monitoring-header">
-        <div><span>全厂实时态势 · ${monitoringBackend.status === "live" ? "实时数据" : "本地演示数据"}</span><h1 id="monitoring-title">工厂消防态势监测</h1><p>火警主机事件经 ARK 网关按 Modbus 规约解析入库；报警信号需人工核实后才建立处置事件。</p><span class="monitoring-connection ${monitoringBackend.status}" data-monitoring-connection><b></b>${monitoringBackend.status === "live" ? "后端实时连接" : monitoringBackend.status === "connecting" ? "正在连接后端" : "使用本地演示数据"}</span></div>
-        <div class="monitoring-kpis" aria-label="全厂汇总">
-          <div><small>厂区单元</small><strong>${summary.enterprise_count}</strong></div><div><small>在线率</small><strong>${summary.online_rate}%</strong></div><div><small>待核实信号</small><strong class="status-red">${summary.pending_signal_count}</strong></div><div><small>维保逾期</small><strong class="status-amber">${summary.maintenance_overdue}</strong></div>
-        </div>
-      </header>
       <div class="monitoring-layout">
         <aside class="monitoring-list" aria-labelledby="monitoring-list-title">
-          <div class="monitoring-panel-title"><div><span>RISK QUEUE</span><h2 id="monitoring-list-title">异常单元排序</h2></div><i data-lucide="list-filter"></i></div>
+          <div class="monitoring-panel-title"><div><h2 id="monitoring-list-title">事件队列 <b>${summary.pending_signal_count}</b></h2></div><i data-lucide="list-filter"></i></div>
+          <div class="monitoring-queue-filters" aria-label="事件筛选"><button class="active" disabled data-disabled-reason="当前演示显示全部事件">全部 ${summary.pending_signal_count}</button><button disabled data-disabled-reason="筛选演示占位">待核实 1</button><button disabled data-disabled-reason="筛选演示占位">处理中 2</button></div>
           <div class="monitoring-company-list">
-            ${queueCompanies.map((item, index) => `<button type="button" class="monitoring-company ${item.id === company.id ? "active" : ""}" data-monitoring-company="${item.id}" aria-pressed="${item.id === company.id}"><span>0${index + 1}</span><span><strong>${item.name}</strong><small>${monitoringProfiles[item.id].district} · 在线 ${monitoringProfiles[item.id].online}</small></span>${riskBadge(item)}</button>`).join("")}
+            ${queueCompanies.map((item, index) => `<button type="button" class="monitoring-company ${item.id === company.id ? "active" : ""}" data-monitoring-company="${item.id}" aria-pressed="${item.id === company.id}"><span class="monitoring-event-icon"><i data-lucide="${index === 0 ? "flame" : index === 1 ? "siren" : "circle-alert"}"></i></span><span><small>${index === 0 ? "火警" : item.level === "high" ? "异常" : "告警"} <time>${index === 0 ? "10:24" : index === 1 ? "08:48" : index === 2 ? "07:32" : "昨天"}</time></small><strong>${item.name.replace(/（.*?）/g, "")}</strong><em>${monitoringFloorPositions[item.id]?.label || item.building}</em><small>在线 ${monitoringProfiles[item.id].online} · 指数 ${scoreText(item.score)}</small></span><i data-lucide="chevron-right"></i></button>`).join("")}
           </div>
-          <div class="monitoring-source"><i data-lucide="database"></i><span>火警主机、点位表、维保、巡查数据已汇总</span></div>
+          <div class="monitoring-source"><i data-lucide="database"></i><span>${monitoringBackend.status === "live" ? "后端实时连接" : "本地合成数据"} · ${summary.online_rate}% 在线</span></div>
         </aside>
         <section class="twin-panel" aria-labelledby="twin-title">
-          <header><div><span>DIGITAL TWIN / SYNTHETIC DATA</span><h2 id="twin-title">厂区三维消防态势</h2></div><div class="twin-actions"><button type="button" data-action="inject-demo-event"><i data-lucide="radio-tower"></i>模拟火警帧</button><button type="button" data-action="inject-demo-fault"><i data-lucide="wrench"></i>模拟主机故障</button><button type="button" data-3d-view="top"><i data-lucide="map"></i>俯视</button><button type="button" data-3d-view="reset"><i data-lucide="rotate-ccw"></i>复位</button></div></header>
+          <header class="monitoring-focus-header">
+            <div><span>火警 · 待人工核实</span><h1 id="monitoring-title">${escapeHtml(company.name.replace(/（.*?）/g, ""))} PACK 产线 A1</h1><dl><div><dt>报警时间</dt><dd>2026-08-13 10:24:18</dd></div><div><dt>探测器</dt><dd>${escapeHtml(floorPoint.label)}</dd></div><div><dt>位置</dt><dd>2F / 东区 / PACK 产线 A1</dd></div><div><dt>消防指数</dt><dd>${scoreText(company.score)} / 100</dd></div></dl></div>
+            <div class="twin-actions"><button type="button" data-action="inject-demo-event"><i data-lucide="radio-tower"></i>模拟火警帧</button><button type="button" data-action="inject-demo-fault"><i data-lucide="wrench"></i>模拟故障</button></div>
+          </header>
+          <nav class="monitoring-view-tabs" aria-label="事件视图"><button class="active" disabled data-disabled-reason="当前视图">现场位置</button><button disabled data-disabled-reason="本轮演示聚焦现场位置">信号趋势</button><button disabled data-disabled-reason="本轮演示聚焦现场位置">联动设备</button><button disabled data-disabled-reason="本轮演示聚焦现场位置">历史事件</button></nav>
+          <div class="monitoring-checks"><strong>FireOps 已检查</strong><span><i data-lucide="check"></i>信号稳定性</span><span><i data-lucide="check"></i>相邻探测器</span><span><i data-lucide="check"></i>联动设备</span><span><i data-lucide="check"></i>设备状态</span></div>
           <div id="monitoring-3d" class="twin-viewport" data-selected-company="${company.id}" data-risk-levels="${queueCompanies.map((item) => `${item.id}:${item.level}`).join(",")}" role="img" aria-label="可旋转的厂区建筑群与各车间消防风险三维视图">
             <div class="twin-loading"><span></span>${location.protocol === "file:" ? "直接双击打开无法加载三维场景：请在项目目录运行 python3 -m http.server 4173 后访问 http://127.0.0.1:4173/（或双击 start-demo.command）" : "正在加载三维态势"}</div>
-            <div class="twin-overlay twin-legend"><span><b class="risk-dot high"></b>高风险</span><span><b class="risk-dot medium"></b>中风险</span><span><b class="risk-dot low"></b>低风险</span><span><b class="risk-dot unrated"></b>数据不足</span></div>
-            <div class="twin-overlay twin-hint"><i data-lucide="mouse-pointer-2"></i>拖动旋转 · 滚轮缩放 · 点击风险柱</div>
+            <div class="monitoring-floorplan" style="--alarm-left:${floorPoint.left}%;--alarm-top:${floorPoint.top}%">
+              <div class="monitoring-floor-selector"><button disabled data-disabled-reason="楼层切换演示占位">全部楼层</button><button disabled data-disabled-reason="楼层切换演示占位">3F</button><button class="active" disabled data-disabled-reason="当前楼层">2F</button><button disabled data-disabled-reason="楼层切换演示占位">1F</button></div>
+              <img src="assets/fire-floorplan.png" alt="电池车间二层消防平面图" />
+              <div class="monitoring-zone-label zone-a">极片车间</div><div class="monitoring-zone-label zone-b">化成车间</div><div class="monitoring-zone-label zone-c">电池车间</div><div class="monitoring-zone-label zone-d">成品仓库</div>
+              <button type="button" class="monitoring-alarm-pin" data-action="verify-signal"><i data-lucide="flame"></i><span><strong>${escapeHtml(floorPoint.label)}</strong><small>10:24:18 火警</small></span></button>
+              <div class="monitoring-map-tools"><button disabled data-disabled-reason="缩放演示占位" aria-label="缩小">−</button><span>100%</span><button disabled data-disabled-reason="缩放演示占位" aria-label="放大">＋</button></div>
+            </div>
+            <nav class="twin-beacon-nav monitoring-beacon-bridge" aria-label="三维风险点位">
+              ${queueCompanies.map((item) => `<button type="button" data-enterprise-beacon="${item.id}" aria-pressed="${item.id === company.id}"><b class="risk-dot ${item.level}"></b>${escapeHtml(item.name)}</button>`).join("")}
+            </nav>
           </div>
         </section>
         <aside class="monitoring-detail" aria-labelledby="monitoring-detail-title">
-          <div class="detail-eyebrow"><span>${profile.district}</span>${riskBadge(company)}</div>
-          <h2 id="monitoring-detail-title">${company.name}</h2>
-          <p>${company.industry} · ${company.building}</p>
-          <div class="health-index"><span>消防健康指数</span><strong>${scoreText(company.score)}<small>/100</small></strong><div><i style="width:${company.score || 8}%"></i></div></div>
-          <section class="signal-list" aria-label="风险证据">
-            <h3>风险证据</h3>
-            <div class="signal-danger"><i data-lucide="siren"></i><span><strong>${profile.signal}</strong><small>等待人工核实</small></span></div>
-            <div><i data-lucide="radio-tower"></i><span><strong>${profile.fault}</strong><small>近 30 天趋势</small></span></div>
-            <div><i data-lucide="wrench"></i><span><strong>${profile.maintenance}</strong><small>维保记录汇总</small></span></div>
+          <div class="detail-eyebrow"><h2 id="monitoring-detail-title">证据摘要</h2><strong>5/5</strong></div>
+          <section class="monitoring-evidence-summary" aria-label="证据摘要">
+            ${[["chart-no-axes-column-increasing","信号趋势"],["radio-tower","相邻探测器"],["link","联动设备"],["video","视频复核"],["battery-charging","设备状态"]].map(([icon,label]) => `<div><i data-lucide="${icon}"></i><strong>${label}</strong><span>已检查 <i data-lucide="circle-check"></i></span></div>`).join("")}
           </section>
-          <dl class="monitoring-meta"><div><dt>数据在线率</dt><dd>${profile.online}</dd></div><div><dt>最近更新</dt><dd>${profile.freshness}</dd></div><div><dt>未闭环隐患</dt><dd>${company.openHazards}</dd></div></dl>
-          <button class="monitoring-primary" type="button" data-action="verify-signal"><i data-lucide="shield-alert"></i>发起人工核实</button>
-          <button class="monitoring-secondary" type="button" data-action="company-overview">查看车间档案</button>
-          <p class="monitoring-next-hint">核实：注入本车间火警帧并打开报警核实台 · 档案：看台账摘要并可跳转巡查/班组</p>
+          <section class="monitoring-human-gate"><header><strong>待人工核实</strong><span>必须</span></header><p>请现场或视频确认是否存在火情。</p><ul><li>确认有火情，进入应急处置流程</li><li>如为误报，记录原因并关闭</li></ul><button class="monitoring-primary" type="button" data-action="verify-signal"><i data-lucide="shield-alert"></i>确认火情，启动处置</button><button class="monitoring-secondary" type="button" data-action="verify-signal">误报，进入核实台</button></section>
+          <section class="monitoring-recommendation"><strong><i data-lucide="clipboard-check"></i>建议行动</strong><ol><li>通知现场人员前往核实</li><li>准备灭火器材，等待支援</li></ol></section>
+          <button class="monitoring-dossier-link" type="button" data-action="company-overview">查看 ${escapeHtml(company.name)} 档案 <i data-lucide="arrow-up-right"></i></button>
         </aside>
       </div>
     </section>
@@ -930,7 +1084,7 @@ function hazardPanelContent() {
     <div class="issue-list">
       ${visibleIssues.length ? visibleIssues.map(issueCard).join("") : `<div class="empty-panel"><i data-lucide="circle-check-big"></i><strong>当前筛选没有隐患</strong><span>已闭环记录可在历史列表中查看。</span></div>`}
     </div>
-    <div class="panel-pagination"><span>共 ${catalog.length} 条</span><div><button type="button" disabled><i data-lucide="chevron-left"></i></button><button type="button" class="active">1</button></div></div>
+    <div class="panel-pagination"><span>共 ${catalog.length} 条</span><div><button type="button" disabled aria-label="上一页"><i data-lucide="chevron-left"></i></button><button type="button" class="active" disabled data-disabled-reason="当前仅一页">1</button></div></div>
   `;
 }
 
@@ -983,7 +1137,9 @@ function reportText(company, assessment) {
 }
 
 function renderRoute() {
-  const route = (location.hash || "#/home").replace(/^#\//, "").split("/");
+  const [routePath, queryString = ""] = (location.hash || "#/home").replace(/^#\//, "").split("?");
+  const route = routePath.split("/");
+  applyRouteContext(new URLSearchParams(queryString));
   let root = route[0] || "home";
   if (root === "workbench") {
     root = "inspections";
@@ -1006,6 +1162,8 @@ function renderRoute() {
     app.innerHTML = monitoringTemplate();
   } else if (root === "incidents") {
     app.innerHTML = incidentCommandTemplate();
+  } else if (root === "workflow") {
+    app.innerHTML = workflowSupervisionTemplate();
   } else if (root === "copilot") {
     app.innerHTML = copilotTemplate();
     loadCopilotScenarios();
@@ -1022,11 +1180,32 @@ function renderRoute() {
   bindDynamicActions();
   refreshIcons();
   window.dispatchEvent(new CustomEvent("fireguard:route-rendered", { detail: { root } }));
+  clearTimeout(threeDFallbackTimer);
+  if (root === "monitoring") {
+    threeDFallbackTimer = setTimeout(() => {
+      const host = document.querySelector("#monitoring-3d");
+      if (host && host.getAttribute("data-3d-state") !== "ready") renderThreeDFallback(host);
+    }, 3500);
+  }
+  if (root === "enterprises") loadEnterpriseDossier(selectedCompanyId);
   if (root === "monitoring") startMonitoringBackend();
   else if (monitoringEventSource) stopMonitoringBackend();
-  if (["incidents", "station", "owner", "copilot"].includes(root)) startIncidentBackend();
+  if (["incidents", "station", "owner", "copilot", "workflow"].includes(root)) startIncidentBackend();
   else if (incidentEventSource) stopIncidentBackend();
   window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+function renderThreeDFallback(host) {
+  if (!host || host.getAttribute("data-3d-state") === "ready") return;
+  host.setAttribute("data-3d-state", "fallback");
+  host.classList.add("no-webgl");
+  host.querySelector(".twin-loading")?.remove();
+  if (!host.querySelector(".twin-fallback")) host.insertAdjacentHTML("beforeend", `
+    <div class="twin-fallback">
+      <strong>三维态势暂不可用</strong>
+      <span>业务数据与处置流程不受影响，可继续查看当前车间档案。</span>
+      <a href="#/enterprises/${selectedCompanyId}">打开二维车间档案</a>
+    </div>`);
 }
 
 function bindDynamicActions() {
@@ -1057,6 +1236,7 @@ function bindDynamicActions() {
   });
   document.querySelector("#dossier-enterprise-select")?.addEventListener("change", (event) => {
     selectedCompanyId = event.target.value;
+    enterpriseDossierState = { id: null, data: null, loading: false, error: "" };
     location.hash = `#/enterprises/${selectedCompanyId}`;
   });
   app.querySelectorAll("[data-repair-select]").forEach((button) => button.addEventListener("click", () => {
@@ -1074,6 +1254,10 @@ function bindDynamicActions() {
   }));
   app.querySelectorAll("[data-monitoring-company]").forEach((button) => button.addEventListener("click", () => {
     selectedCompanyId = button.dataset.monitoringCompany;
+    renderRoute();
+  }));
+  app.querySelectorAll("[data-enterprise-beacon]").forEach((button) => button.addEventListener("click", () => {
+    selectedCompanyId = button.dataset.enterpriseBeacon;
     renderRoute();
   }));
   app.querySelectorAll("[data-copilot-bind]").forEach((button) => button.addEventListener("click", () => {
@@ -1137,6 +1321,19 @@ function bindDynamicActions() {
     handleAction(button.dataset.action, button.dataset.issueId);
   }));
 
+  app.querySelectorAll("[data-workflow-continue]").forEach((button) => button.addEventListener("click", () => {
+    const actor = button.dataset.actor;
+    if (actor) setDemoActor(actor);
+    if (button.dataset.incidentId) selectedIncidentId = Number(button.dataset.incidentId);
+    if (button.dataset.crewId) {
+      terminalStationId = button.dataset.crewId;
+      selectedInboxId = null;
+      selectedStationTaskId = null;
+    }
+    location.hash = button.dataset.route || "#/workflow";
+    scheduleIncidentRefresh();
+  }));
+
   app.querySelectorAll("[data-copilot-scenario]").forEach((button) => button.addEventListener("click", () => {
     copilotState.selectedId = button.dataset.copilotScenario;
     renderRoute();
@@ -1147,7 +1344,8 @@ function bindDynamicActions() {
   }));
   app.querySelectorAll("[data-copilot-action]").forEach((button) => button.addEventListener("click", () => {
     const action = button.dataset.copilotAction;
-    if (action === "run") runCopilotScenario();
+    if (action === "judge-run") startJudgeDemo();
+    else if (action === "run") runCopilotScenario();
     else if (action === "reset") resetCopilot();
     else if (action === "dispatch") confirmCopilotDispatch();
     else if (action === "export-audit") exportCopilotAuditPack();
@@ -1290,6 +1488,7 @@ function renderInspectDraftPanel() {
       <strong>${escapeHtml(draft.title)}</strong>
       <span>置信度 ${(Number(draft.confidence || 0) * 100).toFixed(0)}% · 建议责任人 ${escapeHtml(draft.owner)}（${escapeHtml(draft.department)}）</span>
       <p>${escapeHtml(draft.description)}</p>
+      <span>识别来源 ${escapeHtml(draft.provider || "unknown")} / ${escapeHtml(draft.model_name || "unknown")} · ${draft.is_simulation ? "演示推理" : "外部模型"}${draft.fallback_reason ? ` · 已回退：${escapeHtml(draft.fallback_reason)}` : ""}</span>
       <small>${escapeHtml(draft.disclaimer || "")}</small>
     </div>
   `;
@@ -1303,11 +1502,12 @@ async function analyzeInspectionDraft() {
   try {
     const response = await fetch(`${MONITORING_API_BASE}/inspection/analyze`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({
         enterprise_id: selectedCompanyId,
         image_asset: inspectCapture.imageAsset,
         voice_text: inspectCapture.voiceText,
+        mode: copilotState.mode,
       }),
     });
     const payload = await response.json();
@@ -1330,7 +1530,7 @@ async function dispatchInspectionFinding() {
   try {
     const created = await fetch(`${MONITORING_API_BASE}/inspection/findings`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({
         enterprise_id: selectedCompanyId,
         image_asset: inspectCapture.imageAsset,
@@ -1344,7 +1544,7 @@ async function dispatchInspectionFinding() {
     const findingId = created.finding.id;
     const dispatched = await fetch(`${MONITORING_API_BASE}/inspection/findings/${findingId}/dispatch`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({ note: "巡查员人工确认派发网格责任人（模拟）" }),
     }).then(async (response) => {
       const payload = await response.json();
@@ -1396,7 +1596,7 @@ async function scanMaintenanceOverdue() {
   try {
     const response = await fetch(`${MONITORING_API_BASE}/maintenance/overdue-scan`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({ enterprise_id: selectedCompanyId, create_drafts: true }),
     });
     const payload = await response.json();
@@ -1413,7 +1613,7 @@ async function approveMaintenanceWorkorder(workorderId) {
   try {
     const response = await fetch(`${MONITORING_API_BASE}/workorders/${workorderId}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({ note: "值班负责人确认派发维保组（模拟）" }),
     });
     const payload = await response.json();
@@ -1431,7 +1631,7 @@ async function approveMaintenanceWorkorder(workorderId) {
 async function postWorkorderTransition(workorderId, action, note) {
   const response = await fetch(`${MONITORING_API_BASE}/workorders/${workorderId}/${action}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: actorHeaders(),
     body: JSON.stringify({ note }),
   });
   const payload = await response.json().catch(() => ({}));
@@ -1472,7 +1672,7 @@ async function recheckInspectionFinding() {
   try {
     const response = await fetch(`${MONITORING_API_BASE}/inspection/findings/${issue.findingId}/recheck`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: actorHeaders(),
       body: JSON.stringify({ result: "passed", note: "专项复查通过（模拟）" }),
     });
     const payload = await response.json();
@@ -1508,6 +1708,8 @@ async function importCsvFiles(files) {
   for (const file of files) {
     bundle[file.name] = window.FireGuardEngine.parseCsv(await file.text());
   }
+  const enterpriseId = bundle["enterprises.csv"]?.[0]?.enterprise_id;
+  for (const fileName of expectedCsvFiles.slice(1)) bundle[fileName] = bundle[fileName].filter((row) => row.enterprise_id === enterpriseId);
   const validation = window.FireGuardEngine.validateBundle(bundle);
   if (!validation.valid) throw new Error(validation.errors.slice(0, 3).join("；"));
 
@@ -1563,6 +1765,9 @@ function handleAction(action, issueId) {
     const stationId = document.querySelector("#dispatch-station")?.value;
     if (!stationId) return showToast("当前片区没有可派单的班组");
     return postIncidentAction(`/incidents/${selectedIncidentId}/dispatch`, { station_id: stationId }, "工单已派发至处置班组");
+  }
+  if (action === "close-incident") {
+    return postIncidentAction(`/incidents/${selectedIncidentId}/close`, { note: "现场反馈已人工核验，事件归档" }, "事件已归档，处置班组恢复可调派");
   }
   if (action === "station-next-action") {
     const selected = (incidentBackend.inbox || []).find((item) => item.inbox_id === selectedInboxId);
@@ -1622,6 +1827,18 @@ function handleAction(action, issueId) {
     location.hash = `#/enterprises/${selectedCompanyId}`;
     return;
   }
+  if (action === "company-detail") {
+    location.hash = `#/enterprises/${selectedCompanyId}`;
+    return;
+  }
+  if (action === "route-history") return showToast("当前演示保留 2026-07-29 路线，历史记录未导入");
+  if (action === "equipment-detail") return showToast("设备状态来自当前车间台账；完整点位编号请在车间档案查看");
+  if (action === "all-equipment") {
+    activeRightTab = "equipment";
+    location.hash = routeHash("inspections", { enterprise_id: selectedCompanyId });
+    renderRoute();
+    return;
+  }
   if (action === "hazards") { activeRightTab = "hazards"; location.hash = "#/inspections"; renderRoute(); return; }
   if (action === "equipment") { activeRightTab = "equipment"; location.hash = "#/inspections"; renderRoute(); return; }
   if (action === "inspection") { activeRightTab = "hazards"; location.hash = "#/inspections"; renderRoute(); return; }
@@ -1637,11 +1854,18 @@ function handleAction(action, issueId) {
     scanMaintenanceOverdue();
     return;
   }
-  showToast("该功能将在下一阶段接入真实数据");
+  console.error(`Unhandled UI action: ${action}`);
 }
 
 function bindHeaderActions() {
   document.querySelectorAll(".app-header [data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
+  const actor = document.querySelector("#demo-actor");
+  if (!actor) return;
+  actor.value = demoActorId;
+  actor.addEventListener("change", () => {
+    setDemoActor(actor.value);
+    showToast(`已切换演示身份：${actor.options[actor.selectedIndex].text}`);
+  });
 }
 
 function runSelfCheck() {
@@ -1662,6 +1886,17 @@ function selectedCopilotScenario() {
   return copilotState.scenarios?.find((item) => item.scenario_id === copilotState.selectedId) || copilotState.scenarios?.[0] || null;
 }
 
+function copilotPhaseForRun(run) {
+  if (run.plan.abstained) return "abstained";
+  const verificationStatus = run.trace.find((entry) => entry.name === "get_signal_context" && entry.ok)?.data?.verification_status;
+  const workorder = run.trace.find((entry) => entry.name === "create_workorder_draft");
+  if (workorder) return workorder.ok ? "dispatch" : "blocked";
+  if (verificationStatus === "confirmed" && run.incident_id) return "handoff";
+  if (verificationStatus === "dismissed") return "closed";
+  if (run.trace.some((entry) => entry.name === "create_verification_draft" && entry.ok)) return "verification";
+  return "advisory";
+}
+
 async function loadCopilotScenarios() {
   if (copilotState.scenarios) return;
   try {
@@ -1678,7 +1913,7 @@ async function loadCopilotScenarios() {
 
 async function copilotPost(path, body) {
   const response = await fetch(`${MONITORING_API_BASE}${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: actorHeaders(), body: JSON.stringify(body),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.detail || "copilot_action_failed");
@@ -1701,6 +1936,7 @@ function bindHubSignal(eventId, enterpriseId, preferredScenarioId) {
 async function runCopilotScenario() {
   const scenario = selectedCopilotScenario();
   if (!scenario || copilotState.busy) return;
+  setDemoActor("duty-demo");
   copilotState.busy = true;
   renderRoute();
   try {
@@ -1730,10 +1966,9 @@ async function runCopilotScenario() {
     copilotState.run = run;
     copilotState.verification = null;
     copilotState.dispatch = null;
-    // 火警场景先过核实闸；设施故障诊断场景直接进入工单派发审批。
-    const hasVerificationDraft = run.trace.some((entry) => entry.name === "create_verification_draft" && entry.ok);
-    const hasWorkorderDraft = run.trace.some((entry) => entry.name === "create_workorder_draft" && entry.ok);
-    copilotState.phase = run.plan.abstained ? "abstained" : hasVerificationDraft ? "verification" : hasWorkorderDraft ? "dispatch" : "verification";
+    copilotState.verificationActor = null;
+    copilotState.dispatchActor = null;
+    copilotState.phase = copilotPhaseForRun(run);
   } catch (error) {
     showToast(`Copilot 运行失败：${error.message}`);
     copilotState.phase = "select";
@@ -1741,6 +1976,21 @@ async function runCopilotScenario() {
     copilotState.busy = false;
     renderRoute();
   }
+}
+
+async function startJudgeDemo() {
+  if (copilotState.busy) return;
+  const scenario = copilotState.scenarios?.find((item) => item.scenario_id === "B-confirmed-fire-battery-workorder");
+  if (!scenario) return showToast("评委演示场景尚未加载");
+  const station = incidentBackend.stations.find((item) => item.id === "crew-wx-01");
+  if (station && station.status !== "available") return showToast("西区班组正在执行其他任务，请先到流程监管完成该任务");
+  resetCopilot();
+  copilotState.judgeMode = true;
+  copilotState.selectedId = scenario.scenario_id;
+  copilotState.mode = "scenario";
+  copilotState.bindSource = "scenario";
+  copilotState.judgeProgress = ["Agent 正在解析报警并补齐证据"];
+  await runCopilotScenario();
 }
 
 async function confirmCopilotVerification(result) {
@@ -1751,6 +2001,7 @@ async function confirmCopilotVerification(result) {
     await copilotPost(`/signals/${copilotState.eventId}/verification`, { result, note: "Copilot 演示中的人工确认" });
     await copilotPost(`/copilot/runs/${copilotState.run.run_id}/approve`, { action: "verification_result" });
     copilotState.verification = result;
+    copilotState.verificationActor = demoActorId;
     if (result === "confirmed") {
       const run = await copilotPost("/copilot/runs", {
         enterprise_id: scenario.enterprise_id,
@@ -1761,12 +2012,28 @@ async function confirmCopilotVerification(result) {
         mode: copilotState.mode,
       });
       copilotState.run = run;
-      copilotState.phase = "dispatch";
+      copilotState.phase = copilotPhaseForRun(run);
     } else {
       copilotState.phase = "closed";
     }
   } catch (error) {
-    showToast(`核实登记失败：${error.message}`);
+    if (error.message === "verification_conflict") {
+      try {
+        const run = await copilotPost("/copilot/runs", {
+          enterprise_id: scenario.enterprise_id, event_id: copilotState.eventId,
+          reporter_text: scenario.input.reporter_text,
+          image_assets: (scenario.input.images || []).map((image) => image.asset),
+          scenario_id: scenario.scenario_id, mode: copilotState.mode,
+        });
+        copilotState.run = run;
+        copilotState.phase = copilotPhaseForRun(run);
+        showToast("该信号已核实，已恢复到数据库中的当前步骤");
+      } catch (refreshError) {
+        showToast(`状态恢复失败：${refreshError.message}`);
+      }
+    } else {
+      showToast(`核实登记失败：${incidentErrorMessage(error.message)}`);
+    }
   } finally {
     copilotState.busy = false;
     renderRoute();
@@ -1778,6 +2045,7 @@ async function confirmCopilotDispatch() {
   const draft = run?.trace.find((entry) => entry.name === "create_workorder_draft" && entry.ok);
   if (!draft || copilotState.busy) return;
   copilotState.busy = true;
+  let autoSimulate = false;
   try {
     // 火警处置单走 incident_dispatches；维修/故障工单写入 ops_workorders 中枢。
     if (run.incident_id) {
@@ -1803,25 +2071,70 @@ async function confirmCopilotDispatch() {
     }
     await copilotPost(`/copilot/runs/${copilotState.run.run_id}/approve`, { action: "workorder_dispatch" });
     copilotState.dispatch = draft.data.crew_id;
+    copilotState.dispatchActor = demoActorId;
     copilotState.phase = "done";
     terminalStationId = draft.data.crew_id || (run.incident_id ? "crew-wx-01" : "crew-wb-01");
-    showToast("工单已写入统一中枢，正在打开班组终端…");
-    location.hash = "#/station";
+    autoSimulate = copilotState.judgeMode && Boolean(run.incident_id);
+    showToast("工单已派发，下一步由班组签收");
     scheduleIncidentRefresh();
   } catch (error) {
-    showToast(`工单派发失败：${error.message}`);
+    showToast(`工单派发失败：${incidentErrorMessage(error.message)}`);
   } finally {
     copilotState.busy = false;
     renderRoute();
   }
+  if (autoSimulate) await runJudgeCrewSimulation();
+}
+
+async function runJudgeCrewSimulation() {
+  const incidentId = copilotState.run?.incident_id;
+  if (!incidentId || copilotState.busy) return;
+  copilotState.phase = "crew_simulation";
+  copilotState.busy = true;
+  copilotState.judgeProgress = [];
+  setDemoActor("crew-demo");
+  renderRoute();
+  try {
+    await refreshIncidentBackend();
+    const incident = incidentBackend.incidents.find((item) => item.id === incidentId);
+    const dispatchId = incident?.dispatch?.id;
+    if (!dispatchId) throw new Error("dispatch_not_ready");
+    for (const [action, label] of [["acknowledge", "班组已签收"], ["depart", "班组已出动"], ["arrive", "班组已到场"]]) {
+      await copilotPost(`/dispatches/${dispatchId}/transition`, { action, note: `评委引导演示：${label}（模拟）` });
+      copilotState.judgeProgress.push(label);
+      renderRoute();
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    }
+    await copilotPost(`/dispatches/${dispatchId}/report`, {
+      situation: "评委演示：现场明火已扑灭，人员全部撤离（合成）",
+      people_status: "no_risk",
+    });
+    copilotState.judgeProgress.push("现场反馈已回传");
+    await refreshIncidentBackend();
+    setDemoActor("duty-demo");
+    selectedIncidentId = incidentId;
+    location.hash = `#/incidents?incident_id=${incidentId}`;
+    showToast("班组模拟处置完成，请值班员核验归档");
+  } catch (error) {
+    copilotState.phase = "done";
+    showToast(`自动演示中断：${incidentErrorMessage(error.message)}`);
+  } finally {
+    copilotState.busy = false;
+    if ((location.hash || "").startsWith("#/copilot")) renderRoute();
+  }
 }
 
 function resetCopilot() {
+  setDemoActor("duty-demo");
   copilotState.phase = "select";
   copilotState.run = null;
   copilotState.eventId = null;
   copilotState.verification = null;
   copilotState.dispatch = null;
+  copilotState.verificationActor = null;
+  copilotState.dispatchActor = null;
+  copilotState.judgeMode = false;
+  copilotState.judgeProgress = [];
   renderRoute();
 }
 
@@ -1849,8 +2162,12 @@ function exportCopilotAuditPack() {
     rejected_evidence: run.rejected_evidence,
     tool_trace: run.trace,
     human_decisions: [
-      copilotState.verification && { action: "verification_result", value: copilotState.verification },
-      copilotState.dispatch && { action: "workorder_dispatch", value: copilotState.dispatch },
+      copilotState.verification && {
+        action: "verification_result", value: copilotState.verification, actor_id: copilotState.verificationActor,
+      },
+      copilotState.dispatch && {
+        action: "workorder_dispatch", value: copilotState.dispatch, actor_id: copilotState.dispatchActor,
+      },
     ].filter(Boolean),
     role_briefs: run.trace.filter((entry) => entry.name === "build_role_brief" && entry.ok).map((entry) => entry.data),
   };
@@ -1877,6 +2194,7 @@ function copilotTemplate() {
           <span class="copilot-badge"><i data-lucide="shield-check"></i>AI 不替代现场处置决策</span>
         </div>
       </header>
+      <a class="copilot-workflow-jump" href="#/workflow"><span><i data-lucide="route"></i>流程监管</span><strong>${incidentBackend.incidents.filter((incident) => incident.status !== "closed").length} 个进行中事件</strong><small>查看当前步骤、责任角色和下一动作</small><i data-lucide="arrow-right"></i></a>
       ${copilotState.scenarios === null ? `<div class="copilot-empty">正在加载演示场景…</div>` : ""}
       ${Array.isArray(copilotState.scenarios) && copilotState.scenarios.length === 0 ? `<div class="copilot-empty">无法连接后端（${MONITORING_API_BASE}），请先启动后端服务。</div>` : ""}
       ${scenario ? copilotSelectTemplate(scenario) : ""}
@@ -1898,6 +2216,11 @@ function copilotSelectTemplate(scenario) {
     `;
   }
   return `
+    <section class="judge-demo-entry" aria-labelledby="judge-demo-title">
+      <div><span>JUDGE DEMO / 90 SEC</span><h2 id="judge-demo-title">一条主线看懂 FireOps AI</h2><p>自动运行报警解析、工具调用和班组模拟；仅在火警核实、派单批准、最终归档时由人确认。</p></div>
+      <ol><li>AI 研判</li><li>人工核实</li><li>人工派单</li><li>模拟处置</li><li>人工归档</li></ol>
+      <button type="button" class="primary-action" data-copilot-action="judge-run"><i data-lucide="play"></i>开始评委演示</button>
+    </section>
     <div class="copilot-setup">
       <div class="copilot-scenarios">
         ${copilotState.scenarios.map((item) => `
@@ -1974,7 +2297,7 @@ function copilotRunTemplate() {
         </section>
         <section class="copilot-panel">
           <h2>证据</h2>
-          ${plan.evidence.length ? `<ul class="copilot-evidence">${plan.evidence.map((ref) => `<li><i data-lucide="link"></i><code>${escapeHtml(ref.ref)}</code><small>${escapeHtml(ref.kind)}</small></li>`).join("")}</ul>` : `<p class="copilot-empty">本次运行没有可引用的证据。</p>`}
+          ${plan.evidence.length ? `<ul class="copilot-evidence">${plan.evidence.map((ref) => `<li><i data-lucide="link"></i><span><code>${escapeHtml(ref.ref)}</code><small>${escapeHtml(ref.kind)}${ref.note ? ` · ${escapeHtml(ref.note)}` : ""}</small></span></li>`).join("")}</ul>` : `<p class="copilot-empty">本次运行没有可引用的证据。</p>`}
           ${run.rejected_evidence.length ? `<p class="copilot-rejected">已拦截虚构证据：${run.rejected_evidence.map(escapeHtml).join("、")}</p>` : ""}
         </section>
       </div>
@@ -2029,10 +2352,29 @@ function copilotPhaseTemplate() {
       </section>
     `;
   }
+  if (copilotState.phase === "blocked") {
+    const failure = run.trace.find((entry) => entry.name === "create_workorder_draft" && !entry.ok);
+    return `
+      <section class="copilot-panel copilot-blocked">
+        <h2><i data-lucide="circle-alert"></i>派单暂时受阻</h2>
+        <p>${failure?.error === "crew_unavailable" ? "对应片区的处置班组正在执行其他任务，系统没有生成一张无法履行的工单。" : `工单草稿未通过校验：${escapeHtml(failure?.error || "未知原因")}`}</p>
+        <small>先到流程监管完成占用班组的签收、到场、反馈与归档，班组释放后再派发本事件。</small>
+        <div class="copilot-actions"><a class="primary-action" href="#/workflow"><i data-lucide="route"></i>查看流程监管</a><a class="secondary-action" href="#/incidents"><i data-lucide="radio-tower"></i>返回值班台</a></div>
+      </section>`;
+  }
+  if (copilotState.phase === "advisory") {
+    return `<section class="copilot-panel copilot-done"><h2><i data-lucide="badge-info"></i>咨询卡已生成</h2><p>本场景只提供证据与人工操作指引，不生成工单，也不控制现场设备。</p><div class="copilot-actions"><a class="secondary-action" href="#/workflow"><i data-lucide="route"></i>查看其他事件流程</a></div></section>`;
+  }
+  if (copilotState.phase === "handoff") {
+    const incident = incidentBackend.incidents.find((item) => item.id === run.incident_id);
+    const state = incident ? incidentWorkflowState(incident) : { actor: "duty-demo", action: "进入流程监管", route: "#/workflow" };
+    return `<section class="copilot-panel copilot-done"><h2><i data-lucide="check-circle-2"></i>该信号已经完成核实</h2><p>处置事件 #${run.incident_id} 已建立。${state.actor === "crew-demo" ? "本片区班组正在执行其他事件，请先完成该任务并释放班组。" : "下一步由值班员选择可用班组并派单。"}</p><div class="copilot-actions"><button type="button" class="primary-action" data-workflow-continue data-actor="${state.actor}" data-incident-id="${run.incident_id}" data-crew-id="${state.crewId || ""}" data-route="${state.route}"><i data-lucide="send"></i>${state.action}</button><a class="secondary-action" href="#/workflow"><i data-lucide="route"></i>查看流程监管</a></div></section>`;
+  }
   const verificationDraft = run.trace.find((entry) => entry.name === "create_verification_draft" && entry.ok);
   if (copilotState.phase === "verification" && verificationDraft) {
     return `
       <section class="copilot-panel copilot-approval">
+        ${copilotState.judgeMode ? `<div class="judge-gate"><b>人工闸门 1/3</b><span>Agent 只生成核实草稿，火警结论由值班员确认。</span></div>` : ""}
         <h2><i data-lucide="stamp"></i>人工确认 · 报警核实</h2>
         <p>${escapeHtml(verificationDraft.data.note || "")}</p>
         <small>草稿状态：${escapeHtml(verificationDraft.data.status || "")}。Agent 只生成草稿，核实结果由消控室值班员登记。</small>
@@ -2050,6 +2392,7 @@ function copilotPhaseTemplate() {
     const isRepairOrder = !run.incident_id;
     return `
       <section class="copilot-panel copilot-approval">
+        ${copilotState.judgeMode ? `<div class="judge-gate"><b>人工闸门 2/3</b><span>确认后自动演示班组签收、出动、到场和反馈。</span></div>` : ""}
         <h2><i data-lucide="stamp"></i>人工确认 · ${isRepairOrder ? "维修工单派发" : "处置单派发"}</h2>
         <p>建议班组：<strong>${escapeHtml(draft?.data.crew_id || "未知")}</strong>${recommend ? `（当班可用：${recommend.data.recommended.map((crew) => escapeHtml(crew.id)).join("、")}）` : ""}</p>
         ${draft?.data.summary ? `<p class="copilot-workorder-summary">${escapeHtml(draft.data.summary)}</p>` : ""}
@@ -2061,15 +2404,18 @@ function copilotPhaseTemplate() {
       ${copilotBriefsTemplate(briefs)}
     `;
   }
+  if (copilotState.phase === "crew_simulation") {
+    const steps = ["班组已签收", "班组已出动", "班组已到场", "现场反馈已回传"];
+    return `<section class="copilot-panel judge-simulation"><span>CREW SIMULATION</span><h2>正在模拟班组处置</h2><p>以下动作均为合成演示，不控制真实设备。</p><ol>${steps.map((step) => `<li class="${copilotState.judgeProgress.includes(step) ? "done" : "pending"}">${step}</li>`).join("")}</ol></section>`;
+  }
   if (copilotState.phase === "done") {
     return `
       <section class="copilot-panel copilot-done">
         <h2><i data-lucide="check-circle-2"></i>工单已派发：${escapeHtml(copilotState.dispatch || "")}</h2>
-        <p>同一事件编号已同步到相关工作台，审批与 Agent 活动已写入时间线，可导出审计包复核。</p>
+        <p>值班员的工作到这里结束。下一步由处置/维保班组签收，状态会继续回传到流程监管。</p>
         <div class="copilot-actions">
-          <a class="primary-action" href="#/incidents"><i data-lucide="radio-tower"></i>值班台跟踪</a>
-          <a class="secondary-action" href="#/station"><i data-lucide="siren"></i>班组签收</a>
-          <a class="secondary-action" href="#/inspections"><i data-lucide="clipboard-check"></i>防火巡查</a>
+          <button type="button" class="primary-action" data-workflow-continue data-actor="crew-demo" data-incident-id="${run.incident_id || ""}" data-crew-id="${escapeHtml(copilotState.dispatch || "")}" data-route="#/station?crew_id=${encodeURIComponent(copilotState.dispatch || "")}"><i data-lucide="siren"></i>交接给班组并继续</button>
+          <a class="secondary-action" href="#/workflow"><i data-lucide="route"></i>查看完整流程</a>
         </div>
       </section>
     `;

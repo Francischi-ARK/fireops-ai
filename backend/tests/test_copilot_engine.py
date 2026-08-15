@@ -11,10 +11,14 @@ def run(coro):
 
 
 class EngineFakeProvider:
-    def __init__(self, verification_status="pending", with_incident=False, event_type="fire_alarm"):
+    def __init__(self, verification_status="pending", with_incident=False, event_type="fire_alarm", crews=None):
         self.verification_status = verification_status
         self.with_incident = with_incident
         self.event_type = event_type
+        self.crews = crews or [
+            {"id": "crew-wx-01", "district": "西区", "status": "available"},
+            {"id": "crew-wb-01", "district": "西区", "status": "available"},
+        ]
         self.appended = []
 
     async def get_signal(self, event_id):
@@ -73,10 +77,7 @@ class EngineFakeProvider:
         return rows[:limit]
 
     async def list_crews(self):
-        return [
-            {"id": "crew-wx-01", "district": "西区", "status": "available"},
-            {"id": "crew-wb-01", "district": "西区", "status": "available"},
-        ]
+        return self.crews
 
     async def get_incident(self, incident_id):
         return {"id": incident_id, "status": "pending_dispatch", "enterprise_id": "ent-001"}
@@ -131,6 +132,13 @@ class ScenarioModeTests(unittest.TestCase):
         self.assertIn("recommend_crew", names)
         self.assertIn("verification_result", result.plan.approval_required)
 
+    def test_scenario_a_does_not_reopen_confirmed_verification(self):
+        provider = EngineFakeProvider(verification_status="confirmed", with_incident=True)
+        result = run(CopilotEngine(provider).run(make_create(SCENARIO_A, "ent-005")))
+        names = [entry.name for entry in result.trace]
+        self.assertNotIn("create_verification_draft", names)
+        self.assertEqual(result.incident_id, 501)
+
     def test_scenario_b_after_confirmation_includes_draft_and_briefs(self):
         provider = EngineFakeProvider(verification_status="confirmed", with_incident=True)
         engine = CopilotEngine(provider)
@@ -142,6 +150,21 @@ class ScenarioModeTests(unittest.TestCase):
         self.assertTrue(draft.ok)
         roles = [e.data.get("role") for e in result.trace if e.name == "build_role_brief"]
         self.assertEqual(roles, ["duty_officer", "responder", "area_owner"])
+
+    def test_scenario_b_does_not_offer_busy_response_crew(self):
+        provider = EngineFakeProvider(
+            verification_status="confirmed", with_incident=True,
+            crews=[
+                {"id": "crew-wx-01", "district": "西区", "status": "awaiting_ack"},
+                {"id": "crew-wb-01", "district": "西区", "status": "available"},
+            ],
+        )
+        result = run(CopilotEngine(provider).run(make_create(SCENARIO_B)))
+        recommendation = next(e for e in result.trace if e.name == "recommend_crew")
+        draft = next(e for e in result.trace if e.name == "create_workorder_draft")
+        self.assertEqual(recommendation.data["recommended"], [])
+        self.assertFalse(draft.ok)
+        self.assertEqual(draft.error, "crew_unavailable")
 
     def test_scenario_c_fault_diagnosis_produces_cited_workorder(self):
         engine = CopilotEngine(EngineFakeProvider(event_type="fault"))
@@ -190,6 +213,14 @@ class SlowModelClient:
     async def complete(self, system_prompt, user_prompt):
         await asyncio.sleep(5)
         return "{}"
+
+
+class UnconfiguredModelClient:
+    model = "unconfigured-model"
+    configured = False
+
+    async def complete(self, system_prompt, user_prompt):
+        raise AssertionError("unconfigured model client must not make a network call")
 
 
 VALID_PLAN_JSON = json.dumps({
@@ -253,6 +284,26 @@ class LiveModeTests(unittest.TestCase):
         result = run(engine.run(self.make_live_create()))
         self.assertEqual(result.fallback_reason, "model_timeout")
         self.assertEqual(result.status, "completed")
+
+    def test_missing_api_key_falls_back_without_calling_provider(self):
+        engine = CopilotEngine(EngineFakeProvider(), model_client=UnconfiguredModelClient())
+        result = run(engine.run(self.make_live_create()))
+        self.assertEqual(result.fallback_reason, "model_not_configured")
+        self.assertEqual(result.model_name, "deterministic-template")
+        self.assertEqual(result.status, "completed")
+
+    def test_unmatched_live_input_safely_abstains_when_model_not_configured(self):
+        create = CopilotRunCreate(
+            enterprise_id="ent-001",
+            reporter_text="自由文本，没有匹配场景",
+            mode="live",
+        )
+        engine = CopilotEngine(EngineFakeProvider(), model_client=UnconfiguredModelClient())
+        result = run(engine.run(create))
+        self.assertEqual(result.fallback_reason, "model_not_configured")
+        self.assertEqual(result.status, "abstained")
+        self.assertTrue(result.plan.abstained)
+        self.assertNotIn("create_workorder_draft", [entry.name for entry in result.trace])
 
 
 if __name__ == "__main__":

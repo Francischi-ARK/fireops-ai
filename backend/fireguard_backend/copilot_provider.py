@@ -1,9 +1,25 @@
 """Wires copilot tools to the real Postgres repository and demo CSV files."""
 
 import csv
+import re
 from pathlib import Path
 
 DEMO_DATA_DIR = Path(__file__).resolve().parents[2] / "demo-data"
+
+KNOWLEDGE_ALIASES = {
+    "备用电源": "备电", "备用电池": "蓄电池", "电瓶": "蓄电池",
+    "接头": "连接器", "八小时": "8小时", "还没恢复": "不能消除",
+    "一路": "回路", "探头": "探测器", "倒计时": "延时",
+    "停止": "停动", "喷放": "气体灭火", "销号": "销项",
+    "报火警": "火警处理",
+}
+
+
+def _normalise_knowledge_text(value):
+    text = str(value or "").lower()
+    for source, target in KNOWLEDGE_ALIASES.items():
+        text = text.replace(source, target)
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
 
 
 class CopilotProvider:
@@ -30,26 +46,53 @@ class CopilotProvider:
         with path.open(encoding="utf-8") as handle:
             return [row for row in csv.DictReader(handle) if row["enterprise_id"] == enterprise_id]
 
-    async def search_knowledge(self, query, limit=3):
-        """确定性的知识库关键词检索：按命中关键词数排序，零命中不返回。
-
-        ponytail: 演示用简化实现；生产环境可替换为向量检索 + 重排，接口不变。
-        """
+    async def search_knowledge(self, query, limit=3, device_model=None, document_type=None):
+        """领域混合检索：精确元数据过滤 + 同义词归一化 + 关键词重排。"""
         path = self.demo_data_dir / "knowledge.csv"
         if not path.exists():
             return []
-        tokens = [token for token in query.replace("，", " ").replace("、", " ").split() if token]
-        if not tokens:
+        normalised_query = _normalise_knowledge_text(query)
+        if not normalised_query:
             return []
         scored = []
         with path.open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
-                haystack = " ".join((row["topic"], row["symptom"], row["guidance"], row["keywords"]))
-                score = sum(1 for token in tokens if token in haystack)
-                if score > 0:
-                    scored.append((score, row))
-        scored.sort(key=lambda item: (-item[0], item[1]["kb_id"]))
-        return [row for _, row in scored[:limit]]
+                row_model = row.get("device_model", "").strip()
+                if device_model and row_model and row_model.casefold() != device_model.casefold():
+                    continue
+                if document_type and row.get("document_type") != document_type:
+                    continue
+
+                reasons = []
+                score = 0
+                topic = _normalise_knowledge_text(row["topic"])
+                symptom = _normalise_knowledge_text(row["symptom"])
+                if topic and topic in normalised_query:
+                    score += 12
+                    reasons.append(f"主题：{row['topic']}")
+                if symptom and symptom in normalised_query:
+                    score += 8
+                    reasons.append(f"现象：{row['symptom']}")
+                for keyword in row["keywords"].split():
+                    token = _normalise_knowledge_text(keyword)
+                    if token and token in normalised_query:
+                        score += 4 if len(token) >= 3 else 2
+                        reasons.append(f"关键词：{keyword}")
+                if row_model and _normalise_knowledge_text(row_model) in normalised_query:
+                    score += 16
+                    reasons.append(f"型号：{row_model}")
+                if score <= 0:
+                    continue
+                result = dict(row)
+                result["retrieval_score"] = score
+                result["match_reasons"] = list(dict.fromkeys(reasons))
+                result["citation"] = {
+                    "document": row["source"], "section": row["section"],
+                    "page": row.get("page", ""), "evidence_ref": row["kb_id"],
+                }
+                scored.append((score, row["kb_id"], result))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [row for _, _, row in scored[:limit]]
 
     async def list_crews(self):
         return await self.repository.list_stations()
@@ -59,6 +102,3 @@ class CopilotProvider:
 
     async def get_incident_by_event(self, event_id):
         return await self.repository.get_incident_by_event(event_id)
-
-    async def append_incident_activity(self, incident_id, event_type, note, actor):
-        return await self.repository.append_incident_activity(incident_id, event_type, note, actor)

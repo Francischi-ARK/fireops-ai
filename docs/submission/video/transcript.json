@@ -1,0 +1,96 @@
+{
+  "schema_version": "fireops-transcript/v1",
+  "language": "zh-CN",
+  "cues": [
+    {
+      "id": "00-cover",
+      "start": 0,
+      "end": 5,
+      "text": "这不是又一块消防大屏。FireOps 把报警帧变成责任闭环。"
+    },
+    {
+      "id": "01-monitoring",
+      "start": 5,
+      "end": 11,
+      "text": "流程从 Modbus 火警帧开始，CRC、控制器、回路和点位都可核验。"
+    },
+    {
+      "id": "02-fire-verify",
+      "start": 11,
+      "end": 18,
+      "text": "值班员先看到设备信号；只有人工确认，系统才建立真实处置事件。"
+    },
+    {
+      "id": "03-fire-dispatch",
+      "start": 18,
+      "end": 25,
+      "text": "派发仍是人工决定。事件编号、证据和责任班组从这里开始绑定。"
+    },
+    {
+      "id": "04-crew-arrival",
+      "start": 25,
+      "end": 32,
+      "text": "班组依次签收、出动、到场，每个按钮只解锁下一合法状态。"
+    },
+    {
+      "id": "05-first-report",
+      "start": 32,
+      "end": 38,
+      "text": "现场首报回到值班台，形成同一 event id 下的完整时间线。"
+    },
+    {
+      "id": "06-copilot-evidence",
+      "start": 38,
+      "end": 45,
+      "text": "AI 不直接操作设备。它拆解任务、查手册、补齐上下文，并把证据编号和工具轨迹同时交付。"
+    },
+    {
+      "id": "07-fault-draft",
+      "start": 45,
+      "end": 52,
+      "text": "主机故障不会挤进火警链。Agent 先检索点位、维保和手册，只生成维修草稿。"
+    },
+    {
+      "id": "08-fault-done",
+      "start": 52,
+      "end": 59,
+      "text": "工单必须经过批准、开工和完成，不能跳步关闭，所有动作都有岗位和时间戳。"
+    },
+    {
+      "id": "09-inspection-draft",
+      "start": 59,
+      "end": 66,
+      "text": "巡查图片和口述只生成隐患草稿，巡查员再选择网格责任人。"
+    },
+    {
+      "id": "10-owner-rectification",
+      "start": 66,
+      "end": 73,
+      "text": "责任人开始整改、提交完成证据；工单 done 仍不等于隐患关闭。"
+    },
+    {
+      "id": "11-inspection-closed",
+      "start": 73,
+      "end": 80,
+      "text": "巡查员复查通过后，finding 才变为 closed，证据链在这里收口。"
+    },
+    {
+      "id": "12-dossier",
+      "start": 80,
+      "end": 85,
+      "text": "企业档案汇总事件、工单、隐患和证据，并把人带回对应岗位流程。"
+    },
+    {
+      "id": "13-safe-abstention",
+      "start": 85,
+      "end": 89,
+      "text": "证据不足时，AI 会列出缺项并拒绝建单。"
+    },
+    {
+      "id": "14-closing",
+      "start": 89,
+      "end": 92,
+      "text": "让 AI 进入现场，但不越过现场的人。"
+    }
+  ]
+}

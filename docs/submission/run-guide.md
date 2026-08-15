@@ -9,40 +9,56 @@
 - Node.js 18+（前端静态服务与 Playwright 验证）
 - Chrome（Playwright 冒烟与 E2E）
 
-## 2. 启动（从零到 Demo 约 2 分钟）
+## 2. 启动
+
+首次获取代码后安装后端依赖：
 
 ```bash
-cd Hackathon/backend
-docker compose up -d --wait postgres      # 容器 fireops-postgres，端口 54330
+cd fireops-ai/backend
 uv sync
-DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard \
-  uv run uvicorn fireguard_backend.app:app --host 127.0.0.1 --port 8000
+cd ..
 ```
 
-另开一个终端：
+启动 Demo：
 
 ```bash
-cd Hackathon
-python3 -m http.server 4173
+cd fireops-ai
+./start-demo.command
 ```
 
-打开 `http://127.0.0.1:4173/#/copilot` 进入 Copilot 演示页。
+脚本兼容 `docker compose` 和 `docker-compose`，会等待 PostgreSQL、API 与前端健康后打开 `http://127.0.0.1:4173/#/monitoring`。
 
-重置演示数据：`cd backend && docker compose down -v` 后重新执行启动步骤。
+浏览器 E2E 额外需要 Node.js 18+、本机 Chrome 和 `playwright`，它们不影响核心 Demo。服务启动后执行：
+
+```bash
+npm install --no-save playwright
+cd backend
+FIREGUARD_TEST_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard_test \
+  PYTHONPATH=. .venv/bin/python tests/reset_test_database.py
+cd ..
+```
+
+重置演示数据：
+
+```bash
+FIREGUARD_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard \
+  PYTHONPATH=backend backend/.venv/bin/python backend/tests/reset_demo_database.py
+```
 
 ## 3. 操作流程
 
 ### 3A. 工作台中枢串联（推荐主演示）
 
 1. `#/monitoring` 选电池车间 →「模拟火警帧」→ 自动跳转 `#/incidents` 同一条待核实信号；
-2. 「确认火警」→「派发工单」→ `#/station` 选择「微型消防站·西区」→ 收件箱可见处置工单并签收；
+2. 「确认火警」→「派发工单」→ `#/station` 选择「微型消防站·西区」→ 签收、出动、到场并提交首报；
 3. 监测页「模拟主机故障」→ 跳转维保组收件箱，确认维修草稿或用 Copilot 诊断后派发；
-4. `#/inspections`「新建巡查识别」→ 派发网格责任人整改（写入同一 `ops_workorders` 中枢）。
+4. `#/inspections`「新建巡查识别」→ 派发网格责任人 → `#/owner` 开始并完成整改 → 返回巡查复查关闭。
 
-### 3B. Copilot 四幕（可绑定中枢信号）
+### 3B. Copilot 五场景（可绑定中枢信号）
 
-1. 选择场景 A/B/C/D；或切换「中枢信号」绑定监测/核实台已有事件（不再新建旁路信号）；
+1. 选择场景 A/B/C/D/E；或切换「中枢信号」绑定监测/核实台已有事件（不再新建旁路信号）；
 2. 运行后按场景完成核实/工单人工确认；派发成功会跳转班组终端。
+3. 场景 D 会列出缺失字段并拒答；场景 E 只提供气体灭火延时咨询，不生成控制类工单。
 
 可选：`python3 scripts/modbus_simulator.py` 向 `POST /gateway/modbus/frames` 注入合成报警帧。
 
@@ -73,24 +89,21 @@ export COPILOT_MODEL_API_KEY=<你的魔搭 API Key>
 
 ```bash
 cd backend
-FIREGUARD_TEST_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard \
-  PYTHONPATH=. uv run python -m unittest discover -s tests
+FIREGUARD_TEST_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard_test \
+  PYTHONPATH=. .venv/bin/python -m unittest discover -s tests
 # 项目根目录
 SMOKE_APP_ROOT="http://127.0.0.1:4173/" node scripts/smoke_test.cjs
 node scripts/copilot_e2e.cjs       # 五场景 E2E（需后端运行中）
-node scripts/crosspage_flow_e2e.cjs  # 监测→核实→派单→班组 / 故障收件箱
+node scripts/crosspage_flow_e2e.cjs  # 火警首报、维修完工、巡查整改与复查闭环
+node scripts/mobile_e2e.cjs          # 390×844 八页面与触控尺寸
+node scripts/monitoring_3d_e2e.cjs   # 3D 就绪、点位交互与二维降级
 ```
 
-重复运行 E2E 前先清空演示库状态（否则场景 B 会撞上班组已被占用）：
-
-```bash
-docker exec fireops-postgres psql -U fireguard -d fireguard -c \
-  "TRUNCATE incident_timeline, dispatch_reports, incident_dispatches, fire_incidents, signal_verifications, monitoring_events, copilot_runs; UPDATE fire_stations SET status='available';"
-```
+重复 E2E 前运行上面的官方 reset；无需手写 SQL。
 
 ## 8. 注意事项
 
 - 全部数据为合成演示数据；不控制真实设备、不自动启动灭火装置；对外报警（119）由人工执行；
 - 接口无身份认证，仅供本地演示与评审复现；
 - SSE 广播为单进程内存实现，多 worker 部署需改为 PostgreSQL LISTEN/NOTIFY；
-- 与原 FireGuard 政府端原型并行时，本仓库 Postgres 使用 54330，勿共用 54329。
+- 本地演示数据库固定使用 54330；测试库与演示库必须分开重置。

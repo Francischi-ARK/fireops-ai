@@ -210,7 +210,7 @@ function canonicalJson(value) {
 function incidentStatusLabel(status) {
   return {
     pending_dispatch: "待调派", dispatched: "已下达", acknowledged: "已签收",
-    enroute: "已出动", arrived: "已到场",
+    enroute: "已出动", arrived: "已到场", closed: "已归档",
   }[status] || "状态未知";
 }
 

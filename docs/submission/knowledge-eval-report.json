@@ -1,0 +1,405 @@
+{
+  "schema_version": "fireops-knowledge-eval-report/v1",
+  "cases": 30,
+  "top1_recall": 0.9642857142857143,
+  "top3_recall": 1.0,
+  "unknown_abstention_rate": 1.0,
+  "results": [
+    {
+      "id": "q01",
+      "query": "备电故障 蓄电池 更换",
+      "expected": [
+        "kb-002"
+      ],
+      "retrieved": [
+        "kb-002",
+        "kb-014"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q02",
+      "query": "主机备用电源报警，充了八小时还没恢复",
+      "expected": [
+        "kb-002"
+      ],
+      "retrieved": [
+        "kb-002"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q03",
+      "query": "控制器电瓶接头松了会报什么故障",
+      "expected": [
+        "kb-002"
+      ],
+      "retrieved": [
+        "kb-002",
+        "kb-014"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q04",
+      "query": "主电停电后一直提示主电异常",
+      "expected": [
+        "kb-001"
+      ],
+      "retrieved": [
+        "kb-001"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q05",
+      "query": "交流保险管断了怎么检查",
+      "expected": [
+        "kb-001"
+      ],
+      "retrieved": [
+        "kb-001"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q06",
+      "query": "回路短路，绝缘电阻要多少",
+      "expected": [
+        "kb-003"
+      ],
+      "retrieved": [
+        "kb-003"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q07",
+      "query": "总线对地绝缘值要求",
+      "expected": [
+        "kb-003"
+      ],
+      "retrieved": [
+        "kb-003"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q08",
+      "query": "单个探测器断线，终端电阻是多少",
+      "expected": [
+        "kb-004"
+      ],
+      "retrieved": [
+        "kb-004",
+        "kb-007"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q09",
+      "query": "4.7k终端电阻设备故障",
+      "expected": [
+        "kb-004"
+      ],
+      "retrieved": [
+        "kb-004",
+        "kb-014"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q10",
+      "query": "电磁阀回路24V过流",
+      "expected": [
+        "kb-005"
+      ],
+      "retrieved": [
+        "kb-005",
+        "kb-009",
+        "kb-003"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q11",
+      "query": "驱动输出保险烧了",
+      "expected": [
+        "kb-005"
+      ],
+      "retrieved": [
+        "kb-005"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q12",
+      "query": "控制器报火警以后先做什么",
+      "expected": [
+        "kb-006"
+      ],
+      "retrieved": [
+        "kb-006"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q13",
+      "query": "火警怎么消音并切手动",
+      "expected": [
+        "kb-006"
+      ],
+      "retrieved": [
+        "kb-006"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q14",
+      "query": "感烟误报，灰尘太大怎么处理",
+      "expected": [
+        "kb-007"
+      ],
+      "retrieved": [
+        "kb-007"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q15",
+      "query": "复位后探测器仍然误报",
+      "expected": [
+        "kb-007"
+      ],
+      "retrieved": [
+        "kb-007",
+        "kb-004",
+        "kb-011"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q16",
+      "query": "气体灭火延时期间怎么停止",
+      "expected": [
+        "kb-008"
+      ],
+      "retrieved": [
+        "kb-008"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q17",
+      "query": "喷放倒计时能不能紧急停动",
+      "expected": [
+        "kb-008"
+      ],
+      "retrieved": [
+        "kb-008"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q18",
+      "query": "检修气体灭火时为什么断开电磁阀",
+      "expected": [
+        "kb-009"
+      ],
+      "retrieved": [
+        "kb-008",
+        "kb-009",
+        "kb-005"
+      ],
+      "hit_top1": false,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q19",
+      "query": "检修前用万用表测什么",
+      "expected": [
+        "kb-009"
+      ],
+      "retrieved": [
+        "kb-009"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q20",
+      "query": "火灾探测器使用寿命多少年",
+      "expected": [
+        "kb-010"
+      ],
+      "retrieved": [
+        "kb-010",
+        "kb-004",
+        "kb-007"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q21",
+      "query": "可燃气探测器多久报废",
+      "expected": [
+        "kb-010"
+      ],
+      "retrieved": [
+        "kb-010",
+        "kb-004",
+        "kb-007"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q22",
+      "query": "modbus事件池寄存器",
+      "expected": [
+        "kb-011"
+      ],
+      "retrieved": [
+        "kb-011"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q23",
+      "query": "事件类型0A代表什么",
+      "expected": [
+        "kb-011"
+      ],
+      "retrieved": [
+        "kb-011"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q24",
+      "query": "RS485通讯超时怎么排查",
+      "expected": [
+        "kb-012"
+      ],
+      "retrieved": [
+        "kb-012"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q25",
+      "query": "高能卡波特率是多少",
+      "expected": [
+        "kb-012"
+      ],
+      "retrieved": [
+        "kb-012"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q26",
+      "query": "确认火警后微型消防站怎么响应",
+      "expected": [
+        "kb-013"
+      ],
+      "retrieved": [
+        "kb-013"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q27",
+      "query": "消防故障24小时不能修好怎么办",
+      "expected": [
+        "kb-014"
+      ],
+      "retrieved": [
+        "kb-014"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q28",
+      "query": "隐患整改完成后是否需要复查",
+      "expected": [
+        "kb-015"
+      ],
+      "retrieved": [
+        "kb-015"
+      ],
+      "hit_top1": true,
+      "hit_top3": true,
+      "abstained": false
+    },
+    {
+      "id": "q29",
+      "query": "消防水泵扬程计算公式",
+      "expected": [],
+      "retrieved": [],
+      "hit_top1": false,
+      "hit_top3": false,
+      "abstained": true
+    },
+    {
+      "id": "q30",
+      "query": "摄像头RTSP密码忘了",
+      "expected": [],
+      "retrieved": [],
+      "hit_top1": false,
+      "hit_top3": false,
+      "abstained": true
+    }
+  ]
+}

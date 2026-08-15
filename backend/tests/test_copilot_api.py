@@ -29,7 +29,7 @@ class FakeCopilotRepository:
     async def get_copilot_run(self, run_id):
         return self.runs.get(run_id)
 
-    async def add_copilot_approval(self, run_id, action, note):
+    async def add_copilot_approval(self, run_id, action, note, actor="消控室值班员（演示）"):
         run = self.runs.get(run_id)
         if not run:
             return None
@@ -87,11 +87,12 @@ class CopilotApiTests(unittest.TestCase):
         trace = loaded.json()["trace_json"]["trace"]
         self.assertEqual(trace[0]["name"], "get_signal_context")
 
-        approved = self.client.post(f"/copilot/runs/{run_id}/approve", json={"action": "verification_result"})
+        headers = {"X-FireOps-Actor": "duty-demo"}
+        approved = self.client.post(f"/copilot/runs/{run_id}/approve", json={"action": "verification_result"}, headers=headers)
         self.assertEqual(approved.status_code, 200)
         self.assertEqual(approved.json()["approvals"], ["verification_result"])
 
-        repeated = self.client.post(f"/copilot/runs/{run_id}/approve", json={"action": "verification_result"})
+        repeated = self.client.post(f"/copilot/runs/{run_id}/approve", json={"action": "verification_result"}, headers=headers)
         self.assertEqual(repeated.json()["approvals"], ["verification_result"])
 
     def test_unknown_scenario_is_422(self):
@@ -100,7 +101,7 @@ class CopilotApiTests(unittest.TestCase):
 
     def test_missing_run_is_404(self):
         self.assertEqual(self.client.get("/copilot/runs/999").status_code, 404)
-        response = self.client.post("/copilot/runs/999/approve", json={"action": "workorder_dispatch"})
+        response = self.client.post("/copilot/runs/999/approve", json={"action": "workorder_dispatch"}, headers={"X-FireOps-Actor": "duty-demo"})
         self.assertEqual(response.status_code, 404)
 
 

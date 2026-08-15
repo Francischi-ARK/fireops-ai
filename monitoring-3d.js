@@ -91,23 +91,23 @@ function buildScene() {
   disposeScene();
   const host = document.querySelector("#monitoring-3d");
   if (!host) return;
+  host.setAttribute("data-3d-state", "loading");
 
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
   } catch {
-    host.classList.add("no-webgl");
-    host.querySelector(".twin-loading").textContent = "当前设备无法启动 WebGL，业务数据仍可在右侧查看";
+    window.renderThreeDFallback?.(host);
     return;
   }
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x071018);
-  scene.fog = new THREE.FogExp2(0x071018, 0.026);
+  scene.fog = new THREE.FogExp2(0x071018, 0.018);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
   const resetView = () => {
-    camera.position.set(13.5, 12.5, 16.5);
-    camera.lookAt(0, 0, 0);
+    camera.position.set(22, 18, 27);
+    camera.lookAt(1, 0, 0);
   };
   resetView();
 
@@ -291,10 +291,10 @@ function buildScene() {
       map: beamTexture, color, transparent: true, opacity,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
     });
-    const outer = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.52, height, 24, 1, true), beamMaterial(selected ? 0.5 : 0.32));
+    const outer = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.24, height, 24, 1, true), beamMaterial(selected ? 0.5 : 0.32));
     outer.position.y = height / 2;
     beacon.add(outer);
-    const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.18, height, 16, 1, true), beamMaterial(selected ? 0.85 : 0.6));
+    const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.075, height, 16, 1, true), beamMaterial(selected ? 0.85 : 0.6));
     inner.position.y = height / 2;
     beacon.add(inner);
 
@@ -374,6 +374,11 @@ function buildScene() {
   });
 
   host.querySelector(".twin-loading")?.remove();
+  host.dataset.buildingTypes = archetypes.join(",");
+  host.dataset.buildingCount = String(buildings.length);
+  host.dataset.beaconCount = String(enterprisePoints.length);
+  renderer.render(scene, camera);
+  host.setAttribute("data-3d-state", "ready");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   renderer.setAnimationLoop((time) => {
     if (!reduceMotion) {

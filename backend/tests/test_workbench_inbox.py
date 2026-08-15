@@ -12,6 +12,27 @@ class FakeInboxRepository:
     async def ping(self):
         return True
 
+    async def get_enterprise(self, enterprise_id):
+        if enterprise_id != "ent-001":
+            return None
+        return {"id": "ent-001", "name": "电池车间（PACK/化成）"}
+
+    async def get_enterprise_dossier(self, enterprise_id):
+        if enterprise_id != "ent-001":
+            return None
+        return {
+            "enterprise": {"id": "ent-001", "name": "电池车间（PACK/化成）"},
+            "profile": {"hazards": ["锂电池模组半成品缓存区（合成）"]},
+            "device_points": [{"point_id": "pt-02-01-005", "location": "PACK线烟感5"}],
+            "recent_events": [{
+                "id": 9, "event_type": "fault", "raw_ref": "monitoring_events/9",
+            }],
+            "findings": [{"id": 4, "title": "灭火器被遮挡", "evidence_refs": ["image:test"]}],
+            "workorders": [{"id": 2, "kind": "repair", "event_id": 9, "status": "draft"}],
+            "evidence_refs": ["monitoring_events/9", "image:test"],
+            "next_context": {"event_id": 9, "workorder_id": 2, "finding_id": 4},
+        }
+
     async def get_workbench_inbox(self, role="crew", crew_id=None, owner=None):
         items = [
             {
@@ -84,6 +105,18 @@ class WorkbenchInboxApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         kinds = {item["kind"] for item in response.json()["items"]}
         self.assertIn("repair", kinds)
+
+    def test_enterprise_dossier_api_includes_maintenance_and_evidence(self):
+        response = self.client.get("/enterprises/ent-001")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("enterprise", body, "enterprise dossier response missing")
+        self.assertEqual(body["enterprise"]["id"], "ent-001")
+        self.assertEqual(body["device_points"][0]["point_id"], "pt-02-01-005")
+        self.assertTrue(body["maintenance_records"])
+        self.assertIn("maint-003", [item["maintenance_id"] for item in body["maintenance_records"]])
+        self.assertIn("maint-003", body["evidence_refs"])
+        self.assertEqual(body["next_context"]["workorder_id"], 2)
 
 
 if __name__ == "__main__":

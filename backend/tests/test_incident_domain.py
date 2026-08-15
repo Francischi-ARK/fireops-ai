@@ -1,6 +1,6 @@
 import unittest
 
-from fireguard_backend import domain
+from fireguard_backend import domain, repository
 
 
 class IncidentDomainTests(unittest.TestCase):
@@ -20,6 +20,13 @@ class IncidentDomainTests(unittest.TestCase):
         self.assertEqual(domain.station_status_for_dispatch("acknowledged"), "assigned")
         self.assertEqual(domain.station_status_for_dispatch("enroute"), "enroute")
         self.assertEqual(domain.station_status_for_dispatch("arrived"), "on_scene")
+
+    def test_database_schema_accepts_archived_terminal_states(self):
+        migration = getattr(repository, "MIGRATE_INCIDENT_STATUSES_SQL", "")
+        self.assertIn("'closed'", repository.INCIDENT_SCHEMA_SQL)
+        self.assertIn("'completed'", repository.INCIDENT_SCHEMA_SQL)
+        self.assertIn("fire_incidents_status_check", migration)
+        self.assertIn("incident_dispatches_status_check", migration)
 
     def test_response_brief_uses_sources_and_keeps_missing_fields_unknown(self):
         brief = domain.build_response_brief({

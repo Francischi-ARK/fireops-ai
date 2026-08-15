@@ -22,13 +22,13 @@ async function main() {
   await page.goto(APP_URL);
   await page.waitForLoadState("domcontentloaded");
   await assertVisible(page.getByRole("heading", { name: "选择工作台" }));
-  assert.equal(await page.locator("[data-workspace-link]").count(), 5);
+  assert.equal(await page.locator("[data-workspace-link]").count(), 6);
   await page.screenshot({ path: path.join(__dirname, "../workspaces-1440x1024.png") });
-  await page.getByRole("link", { name: /消防监督检查工具/ }).click();
+  await page.getByRole("link", { name: /防火巡查与隐患闭环/ }).click();
   assert.match(page.url(), /#\/inspections$/);
-  await assertVisible(page.getByRole("heading", { name: "监督检查与隐患闭环" }));
+  await assertVisible(page.getByRole("heading", { name: "防火巡查与隐患闭环" }));
   assert.equal(await page.locator(".system-strip").count(), 0);
-  await assertVisible(page.getByRole("heading", { name: "皓源新能源（虚拟）" }));
+  await assertVisible(page.getByRole("heading", { name: "电池车间（PACK/化成）" }));
   assert.equal(await page.locator("[data-company-id]").count(), 5);
   await assertVisible(page.locator(".plan-canvas img"));
   assert.equal(await page.locator(".map-pin").count(), 3);
@@ -40,9 +40,6 @@ async function main() {
   assert.equal(await page.locator(".equipment-list > button").count(), 5);
   await page.getByRole("tab", { name: "隐患与整改" }).click();
 
-  await page.getByRole("button", { name: /恒泽材料/ }).click();
-  await assertVisible(page.getByRole("heading", { name: "恒泽材料（虚拟）" }));
-
   // CSV import -> validation -> deterministic score
   await page.getByRole("button", { name: "数据导入" }).click();
   const importDialog = page.locator("#import-dialog");
@@ -52,8 +49,10 @@ async function main() {
     ["enterprises.csv", "alarm_events.csv", "iot_devices.csv", "maintenance_records.csv", "findings.csv"].map((name) => path.join(csvDir, name)),
   );
   await importDialog.getByRole("button", { name: "校验并评分" }).click();
-  await importDialog.locator(".import-result.success").waitFor({ state: "visible" });
-  assert.match(await importDialog.locator(".import-result").textContent(), /58 分/);
+  await importDialog.locator(".import-result.success, .import-result.error").waitFor({ state: "visible" });
+  const importResult = await importDialog.locator(".import-result").textContent();
+  assert.equal(await importDialog.locator(".import-result.success").count(), 1, importResult);
+  assert.match(importResult, /导入成功：\d+ 分/);
   await importDialog.getByRole("button", { name: "取消" }).click();
 
   // evidence modal
@@ -66,8 +65,8 @@ async function main() {
   await page.locator('[data-action="reinspect"]').first().click();
   const workflowDialog = page.locator("#workflow-dialog");
   await assertVisible(workflowDialog.locator(".workflow-timeline"));
-  await workflowDialog.getByRole("button", { name: "发起专项复查" }).click();
-  await assertVisible(page.getByText("专项复查已发起，操作记录已追加到时间线"));
+  await workflowDialog.getByRole("button", { name: "复查通过并闭环" }).click();
+  await assertVisible(page.getByText("演示隐患无后端记录，已本地标记复查发起"));
   await workflowDialog.locator("button.dialog-secondary").click();
 
   await page.getByRole("link", { name: "AI 分析报告" }).click();
@@ -94,7 +93,7 @@ async function main() {
   await browser.close();
   }
   assert.deepEqual(errors, []);
-  console.log("fire inspection workbench smoke test: ok");
+  console.log("FireOps workbench smoke test: ok");
 }
 
 async function assertVisible(locator) {

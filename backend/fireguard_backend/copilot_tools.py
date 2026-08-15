@@ -1,8 +1,7 @@
 """Server-side tool layer for the FireOps Copilot（工厂消防设备运维 Agent）.
 
 Tools are read-only or produce drafts. Domain state changes stay behind the
-existing verification/dispatch APIs; the single exception is
-append_incident_activity, which only runs after a recorded human approval.
+existing verification, approval, dispatch, workorder, and recheck APIs.
 """
 
 from dataclasses import dataclass, field
@@ -24,6 +23,10 @@ class EnterpriseArgs(BaseModel):
     enterprise_id: str = Field(min_length=1, max_length=80)
 
 
+class RecommendCrewArgs(EnterpriseArgs):
+    purpose: str = Field(default="response", pattern="^(response|maintenance)$")
+
+
 class MissingFieldsArgs(BaseModel):
     reporter_text: str = Field(default="", max_length=2000)
     known_fields: Dict[str, Any] = Field(default_factory=dict)
@@ -37,6 +40,8 @@ class VerificationDraftArgs(BaseModel):
 class SearchManualArgs(BaseModel):
     query: str = Field(min_length=1, max_length=200)
     limit: int = Field(default=3, ge=1, le=8)
+    device_model: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    document_type: Optional[str] = Field(default=None, min_length=1, max_length=40)
 
 
 class WorkorderDraftArgs(BaseModel):
@@ -49,12 +54,6 @@ class WorkorderDraftArgs(BaseModel):
 class RoleBriefArgs(BaseModel):
     incident_id: int
     role: str = Field(min_length=1, max_length=20)
-
-
-class AppendActivityArgs(BaseModel):
-    incident_id: int
-    event_type: str = Field(min_length=1, max_length=60)
-    note: str = Field(default="", max_length=300)
 
 
 @dataclass
@@ -136,6 +135,8 @@ async def _create_verification_draft(provider, args: VerificationDraftArgs, ctx:
     signal = await provider.get_signal(args.event_id)
     if not signal:
         return _fail("signal_not_found")
+    if signal.get("verification_status", "pending") != "pending":
+        return _fail("signal_already_verified")
     return ToolResult(ok=True, data={
         "is_draft": True,
         "event_id": args.event_id,
@@ -146,11 +147,18 @@ async def _create_verification_draft(provider, args: VerificationDraftArgs, ctx:
 
 
 async def _search_manual(provider, args: SearchManualArgs, ctx: RunContext) -> ToolResult:
-    """在说明书/规约/管理制度知识库中做确定性关键词检索。"""
-    entries = await provider.search_knowledge(args.query, args.limit)
+    """检索说明书/规约/制度，并返回可展示的出处与匹配理由。"""
+    filters = {key: value for key, value in {
+        "device_model": args.device_model, "document_type": args.document_type,
+    }.items() if value}
+    entries = await provider.search_knowledge(args.query, args.limit, **filters)
     evidence = [
         EvidenceRef(ref=entry["kb_id"], kind="knowledge",
-                    note=f"{entry['source']} {entry['section']}")
+                    note="｜".join(filter(None, (
+                        entry["source"], entry["section"],
+                        f"第{entry['page']}页" if entry.get("page") else "",
+                        "、".join(entry.get("match_reasons", [])[:2]),
+                    ))))
         for entry in entries
     ]
     return ToolResult(ok=True, data={"query": args.query, "entries": entries}, evidence=evidence)
@@ -161,9 +169,11 @@ async def _recommend_crew(provider, args: EnterpriseArgs, ctx: RunContext) -> To
     if not enterprise:
         return _fail("enterprise_not_found")
     crews = await provider.list_crews()
-    available = [c for c in crews if c.get("status") == "available"]
+    prefix = "crew-wx" if args.purpose == "response" else "crew-wb"
+    eligible = [c for c in crews if str(c.get("id", "")).startswith(prefix)]
+    available = [c for c in eligible if c.get("status") == "available"]
     in_district = [c for c in available if c.get("district") == enterprise.get("district")]
-    recommended = in_district or available
+    recommended = in_district
     return ToolResult(
         ok=True,
         data={"recommended": recommended, "backup": [c for c in available if c not in recommended]},
@@ -183,6 +193,9 @@ async def _create_workorder_draft(provider, args: WorkorderDraftArgs, ctx: RunCo
         signal = await provider.get_signal(args.event_id)
         if not signal:
             return _fail("signal_not_found")
+    crew = next((item for item in await provider.list_crews() if item.get("id") == args.crew_id), None)
+    if not crew or crew.get("status") != "available":
+        return _fail("crew_unavailable")
     return ToolResult(ok=True, data={
         "is_draft": True,
         "incident_id": args.incident_id,
@@ -207,19 +220,11 @@ async def _build_role_brief(provider, args: RoleBriefArgs, ctx: RunContext) -> T
     )
 
 
-async def _append_incident_activity(provider, args: AppendActivityArgs, ctx: RunContext) -> ToolResult:
-    record = await provider.append_incident_activity(
-        args.incident_id, args.event_type, args.note, actor="copilot+human-approval",
-    )
-    return ToolResult(ok=True, data=record)
-
-
 @dataclass
 class ToolSpec:
     args_model: Any
     handler: Callable
     description: str
-    requires_approval: bool = False
     state_check: Optional[Callable[[RunContext], bool]] = None
 
 
@@ -235,16 +240,12 @@ TOOLS: Dict[str, ToolSpec] = {
     "find_missing_fields": ToolSpec(MissingFieldsArgs, _find_missing_fields, "对照现场核实要素列出信息缺口"),
     "create_verification_draft": ToolSpec(VerificationDraftArgs, _create_verification_draft, "生成待核实任务草稿"),
     "search_manual": ToolSpec(SearchManualArgs, _search_manual, "检索控制器说明书、通讯规约与管理制度知识库"),
-    "recommend_crew": ToolSpec(EnterpriseArgs, _recommend_crew, "按片区与班组状态给出处置/维保班组建议"),
+    "recommend_crew": ToolSpec(RecommendCrewArgs, _recommend_crew, "按片区、任务类型与班组状态给出建议"),
     "create_workorder_draft": ToolSpec(
         WorkorderDraftArgs, _create_workorder_draft, "生成处置/维修工单草稿（不执行派发）",
         state_check=_workorder_allowed,
     ),
     "build_role_brief": ToolSpec(RoleBriefArgs, _build_role_brief, "生成值班台/处置班组/网格责任人角色摘要"),
-    "append_incident_activity": ToolSpec(
-        AppendActivityArgs, _append_incident_activity, "人工确认后写入事件时间线",
-        requires_approval=True,
-    ),
 }
 
 
@@ -264,8 +265,6 @@ class ToolGuard:
             return _fail("invalid_arguments")
         if spec.state_check is not None and not spec.state_check(ctx):
             return _fail("state_not_allowed")
-        if spec.requires_approval and getattr(args, "event_type", None) not in ctx.approvals:
-            return _fail("approval_required")
         result = await spec.handler(self.provider, args, ctx)
         if result.ok:
             ctx.collected_evidence.extend(result.evidence)
@@ -274,7 +273,7 @@ class ToolGuard:
 
 def validate_evidence(plan: AgentPlan, collected: List[EvidenceRef]) -> List[str]:
     """Drop evidence the tools never produced. Returns the rejected refs."""
-    valid = {ref.ref for ref in collected}
+    valid = {ref.ref: ref for ref in collected}
     rejected = [ref.ref for ref in plan.evidence if ref.ref not in valid]
-    plan.evidence = [ref for ref in plan.evidence if ref.ref in valid]
+    plan.evidence = [valid[ref.ref] for ref in plan.evidence if ref.ref in valid]
     return rejected

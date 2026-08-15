@@ -15,6 +15,10 @@ class InspectionAnalyzeTests(unittest.TestCase):
         self.assertIn("灭火器", draft["title"])
         self.assertEqual(draft["owner"], "李强")
         self.assertGreater(draft["confidence"], 0.5)
+        self.assertEqual(draft["mode"], "scenario")
+        self.assertEqual(draft["provider"], "local-demo")
+        self.assertEqual(draft["model_name"], "deterministic-image-catalog-v1")
+        self.assertEqual(draft["fallback_reason"], "")
 
     def test_voice_only_exit_sign(self):
         draft = analyze_inspection("ent-001", image_asset="", voice_text="化成区疏散指示灯不亮")
@@ -26,6 +30,50 @@ class InspectionAnalyzeTests(unittest.TestCase):
         self.assertTrue(draft["abstained"])
         self.assertFalse(draft["recognized"])
         self.assertIn("hazard_type", draft["missing_fields"])
+        self.assertEqual(draft["provider"], "local-demo")
+
+    def test_live_mode_without_provider_falls_back_explicitly(self):
+        draft = analyze_inspection(
+            "ent-001",
+            image_asset="assets/evidence-extinguisher-blocked.png",
+            mode="live",
+        )
+        self.assertEqual(draft["mode"], "scenario")
+        self.assertEqual(draft["provider"], "local-demo")
+        self.assertEqual(draft["fallback_reason"], "vision_provider_not_configured")
+        self.assertTrue(draft["is_simulation"])
+
+    def test_live_provider_can_be_injected_without_business_state(self):
+        def provider(_enterprise_id, _image_asset, _voice_text):
+            return {
+                "recognized": True,
+                "abstained": False,
+                "confidence": 0.91,
+                "title": "测试隐患",
+                "category": "现场隐患",
+                "severity": "high",
+                "location": "测试点位",
+                "description": "测试 provider 返回的草稿",
+                "department": "生产部",
+                "owner": "李强",
+                "tag": "现场隐患",
+                "pin": {"left": 50, "top": 50},
+                "missing_fields": [],
+                "evidence_refs": ["image:test.png"],
+                "provider": "test-live-provider",
+                "model_name": "test-vision-model",
+            }
+
+        draft = analyze_inspection(
+            "ent-001",
+            image_asset="test.png",
+            mode="live",
+            live_provider=provider,
+        )
+        self.assertEqual(draft["mode"], "live")
+        self.assertEqual(draft["provider"], "test-live-provider")
+        self.assertFalse(draft["is_simulation"])
+        self.assertEqual(draft["external_system"], "vision-provider")
 
 
 class MaintenanceScanTests(unittest.TestCase):

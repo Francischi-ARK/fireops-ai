@@ -98,13 +98,13 @@ CREATE TABLE IF NOT EXISTS signal_verifications (
 CREATE TABLE IF NOT EXISTS fire_incidents (
     id BIGSERIAL PRIMARY KEY, source_event_id BIGINT UNIQUE NOT NULL REFERENCES monitoring_events(id),
     enterprise_id TEXT NOT NULL REFERENCES enterprises(id),
-    status TEXT NOT NULL DEFAULT 'pending_dispatch' CHECK (status IN ('pending_dispatch','dispatched','acknowledged','enroute','arrived')),
+    status TEXT NOT NULL DEFAULT 'pending_dispatch' CHECK (status IN ('pending_dispatch','dispatched','acknowledged','enroute','arrived','closed')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS incident_dispatches (
     id BIGSERIAL PRIMARY KEY, incident_id BIGINT UNIQUE NOT NULL REFERENCES fire_incidents(id),
     station_id TEXT NOT NULL REFERENCES fire_stations(id),
-    status TEXT NOT NULL CHECK (status IN ('issued','acknowledged','enroute','arrived')),
+    status TEXT NOT NULL CHECK (status IN ('issued','acknowledged','enroute','arrived','completed')),
     issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), acknowledged_at TIMESTAMPTZ,
     departed_at TIMESTAMPTZ, arrived_at TIMESTAMPTZ
 );
@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS incident_timeline (
     event_key TEXT UNIQUE NOT NULL, event_type TEXT NOT NULL, actor TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '', occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
+"""
+
+MIGRATE_INCIDENT_STATUSES_SQL = """
+ALTER TABLE fire_incidents DROP CONSTRAINT IF EXISTS fire_incidents_status_check;
+ALTER TABLE fire_incidents ADD CONSTRAINT fire_incidents_status_check
+    CHECK (status IN ('pending_dispatch','dispatched','acknowledged','enroute','arrived','closed'));
+ALTER TABLE incident_dispatches DROP CONSTRAINT IF EXISTS incident_dispatches_status_check;
+ALTER TABLE incident_dispatches ADD CONSTRAINT incident_dispatches_status_check
+    CHECK (status IN ('issued','acknowledged','enroute','arrived','completed'))
 """
 
 CREATE_COPILOT_RUNS_SQL = """
@@ -260,6 +269,7 @@ class PostgresRepository:
             await connection.execute(CREATE_EVENTS_SQL)
             await connection.execute(MIGRATE_EVENT_TYPES_SQL)
             await connection.execute(INCIDENT_SCHEMA_SQL)
+            await connection.execute(MIGRATE_INCIDENT_STATUSES_SQL)
             await connection.execute(CREATE_DEVICE_POINTS_SQL)
             await connection.execute(CREATE_COPILOT_RUNS_SQL)
             await connection.execute(CREATE_FINDINGS_WORKORDERS_SQL)
@@ -321,6 +331,82 @@ class PostgresRepository:
                 f"SELECT {ENTERPRISE_COLUMNS} FROM enterprises WHERE id = %s", (enterprise_id,)
             )).fetchone()
         return serialize_row(row) if row else None
+
+    async def get_enterprise_dossier(self, enterprise_id):
+        """聚合单元台账与可继续处理的业务编号。"""
+        async with await self._connect() as connection:
+            enterprise = await (await connection.execute(
+                f"SELECT {ENTERPRISE_COLUMNS} FROM enterprises WHERE id = %s",
+                (enterprise_id,),
+            )).fetchone()
+            if not enterprise:
+                return None
+            profile = await (await connection.execute(
+                """SELECT address, hazards, access_points, water_sources, facilities
+                FROM enterprise_response_profiles WHERE enterprise_id = %s""",
+                (enterprise_id,),
+            )).fetchone()
+            points = await (await connection.execute(
+                """SELECT point_id, enterprise_id, controller_no, loop_no, point_no,
+                    device_type_code, device_type, location, protect_target
+                FROM device_points WHERE enterprise_id = %s
+                ORDER BY controller_no, loop_no, point_no""",
+                (enterprise_id,),
+            )).fetchall()
+            events = await (await connection.execute(
+                """SELECT m.id, m.enterprise_id, m.event_type, m.severity, m.source,
+                    m.payload, m.occurred_at, m.created_at,
+                    COALESCE(v.status, '') AS verification_status
+                FROM monitoring_events m
+                LEFT JOIN signal_verifications v ON v.monitoring_event_id = m.id
+                WHERE m.enterprise_id = %s
+                ORDER BY m.occurred_at DESC, m.id DESC LIMIT 20""",
+                (enterprise_id,),
+            )).fetchall()
+            findings = await (await connection.execute(
+                """SELECT * FROM inspection_findings WHERE enterprise_id = %s
+                ORDER BY created_at DESC, id DESC LIMIT 20""",
+                (enterprise_id,),
+            )).fetchall()
+            workorders = await (await connection.execute(
+                """SELECT * FROM ops_workorders WHERE enterprise_id = %s
+                ORDER BY created_at DESC, id DESC LIMIT 20""",
+                (enterprise_id,),
+            )).fetchall()
+
+        recent_events = [serialize_row(row) for row in events]
+        for event in recent_events:
+            event["raw_ref"] = f"monitoring_events/{event['id']}"
+        finding_rows = [serialize_row(row) for row in findings]
+        workorder_rows = [serialize_row(row) for row in workorders]
+        evidence = [event["raw_ref"] for event in recent_events]
+        for row in finding_rows + workorder_rows:
+            evidence.extend(row.get("evidence_refs") or [])
+
+        pending_event = next((
+            row for row in recent_events
+            if row["event_type"] == "fire_alarm" and row["verification_status"] == "pending"
+        ), recent_events[0] if recent_events else None)
+        open_workorder = next((
+            row for row in workorder_rows if row["status"] not in ("done", "cancelled")
+        ), None)
+        open_finding = next((
+            row for row in finding_rows if row["status"] not in ("closed", "abstained")
+        ), None)
+        return {
+            "enterprise": serialize_row(enterprise),
+            "profile": serialize_row(profile) if profile else {},
+            "device_points": [serialize_row(row) for row in points],
+            "recent_events": recent_events,
+            "findings": finding_rows,
+            "workorders": workorder_rows,
+            "evidence_refs": list(dict.fromkeys(ref for ref in evidence if ref)),
+            "next_context": {
+                "event_id": pending_event["id"] if pending_event else None,
+                "workorder_id": open_workorder["id"] if open_workorder else None,
+                "finding_id": open_finding["id"] if open_finding else None,
+            },
+        }
 
     async def get_summary(self):
         return summarize_enterprises(await self.list_enterprises())
@@ -607,7 +693,7 @@ class PostgresRepository:
                 timeline_recorded = True
         return {"run_id": run_id, "approvals": list(row["approvals"]), "timeline_recorded": timeline_recorded}
 
-    async def verify_signal(self, event_id, result, note=""):
+    async def verify_signal(self, event_id, result, note="", actor="消控室值班员（模拟）"):
         async with await self._connect() as connection:
             event = await (await connection.execute(
                 """SELECT id, enterprise_id FROM monitoring_events
@@ -646,14 +732,14 @@ class PostgresRepository:
                 )).fetchone()
                 await connection.execute(
                     """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                    VALUES (%s, %s, 'incident_created', '消控室值班员（模拟）', %s)
+                    VALUES (%s, %s, 'incident_created', %s, %s)
                     ON CONFLICT (event_key) DO NOTHING""",
-                    (incident_row["id"], f"incident:{incident_row['id']}:created", note),
+                    (incident_row["id"], f"incident:{incident_row['id']}:created", actor, note),
                 )
                 incident = await self._incident_detail(connection, incident_row["id"])
         return {"changed": True, "verification": serialize_row(verification), "incident": incident}
 
-    async def dispatch_incident(self, incident_id, station_id):
+    async def dispatch_incident(self, incident_id, station_id, actor="消控室值班员（模拟）"):
         async with await self._connect() as connection:
             incident = await (await connection.execute(
                 """SELECT i.id, i.status, e.district FROM fire_incidents i
@@ -689,8 +775,8 @@ class PostgresRepository:
             await connection.execute("UPDATE fire_stations SET status = 'awaiting_ack' WHERE id = %s", (station_id,))
             await connection.execute(
                 """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                VALUES (%s, %s, 'dispatch_issued', '消控室值班员（模拟）', %s)""",
-                (incident_id, f"incident:{incident_id}:dispatch-issued", station["name"]),
+                VALUES (%s, %s, 'dispatch_issued', %s, %s)""",
+                (incident_id, f"incident:{incident_id}:dispatch-issued", actor, station["name"]),
             )
         return {"changed": True, **await self._dispatch_result(incident_id, dispatch["id"], station_id)}
 
@@ -702,7 +788,7 @@ class PostgresRepository:
                 "station": serialize_row(await (await connection.execute("SELECT * FROM fire_stations WHERE id = %s", (station_id,))).fetchone()),
             }
 
-    async def transition_dispatch(self, dispatch_id, action, note=""):
+    async def transition_dispatch(self, dispatch_id, action, note="", actor="处置班组带班员（模拟）"):
         async with await self._connect() as connection:
             ids = await (await connection.execute(
                 "SELECT incident_id, station_id FROM incident_dispatches WHERE id = %s", (dispatch_id,)
@@ -725,12 +811,12 @@ class PostgresRepository:
             await connection.execute("UPDATE fire_stations SET status = %s WHERE id = %s", (station_status_for_dispatch(target), ids["station_id"]))
             await connection.execute(
                 """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                VALUES (%s, %s, %s, '处置班组带班员（模拟）', %s)""",
-                (ids["incident_id"], f"incident:{ids['incident_id']}:{target}", target, note),
+                VALUES (%s, %s, %s, %s, %s)""",
+                (ids["incident_id"], f"incident:{ids['incident_id']}:{target}", target, actor, note),
             )
         return {"changed": True, **await self._dispatch_result(ids["incident_id"], dispatch_id, ids["station_id"])}
 
-    async def add_dispatch_report(self, dispatch_id, situation, people_status):
+    async def add_dispatch_report(self, dispatch_id, situation, people_status, actor="处置班组带班员（模拟）"):
         async with await self._connect() as connection:
             dispatch = await (await connection.execute(
                 "SELECT * FROM incident_dispatches WHERE id = %s FOR UPDATE", (dispatch_id,)
@@ -752,11 +838,39 @@ class PostgresRepository:
             )).fetchone()
             await connection.execute(
                 """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
-                VALUES (%s, %s, 'first_report', '处置班组带班员（模拟）', %s)""",
-                (dispatch["incident_id"], f"incident:{dispatch['incident_id']}:first-report", situation),
+                VALUES (%s, %s, 'first_report', %s, %s)""",
+                (dispatch["incident_id"], f"incident:{dispatch['incident_id']}:first-report", actor, situation),
             )
             detail = await self._incident_detail(connection, dispatch["incident_id"])
         return {"changed": True, "incident": detail, "report": serialize_row(report)}
+
+    async def close_incident(self, incident_id, note="现场反馈已核验，人工归档", actor="消控室值班员（模拟）"):
+        async with await self._connect() as connection:
+            incident = await (await connection.execute(
+                "SELECT id, status FROM fire_incidents WHERE id = %s FOR UPDATE", (incident_id,)
+            )).fetchone()
+            if not incident:
+                raise ValueError("incident_not_found")
+            if incident["status"] == "closed":
+                return {"changed": False, "incident": await self._incident_detail(connection, incident_id)}
+            dispatch = await (await connection.execute(
+                "SELECT id, station_id FROM incident_dispatches WHERE incident_id = %s FOR UPDATE", (incident_id,)
+            )).fetchone()
+            report = dispatch and await (await connection.execute(
+                "SELECT id FROM dispatch_reports WHERE dispatch_id = %s", (dispatch["id"],)
+            )).fetchone()
+            if not report:
+                raise ValueError("close_before_report")
+            await connection.execute("UPDATE incident_dispatches SET status = 'completed' WHERE id = %s", (dispatch["id"],))
+            await connection.execute("UPDATE fire_stations SET status = 'available' WHERE id = %s", (dispatch["station_id"],))
+            await connection.execute("UPDATE fire_incidents SET status = 'closed', updated_at = NOW() WHERE id = %s", (incident_id,))
+            await connection.execute(
+                """INSERT INTO incident_timeline (incident_id, event_key, event_type, actor, note)
+                VALUES (%s, %s, 'incident_closed', %s, %s)""",
+                (incident_id, f"incident:{incident_id}:closed", actor, note),
+            )
+            detail = await self._incident_detail(connection, incident_id)
+        return {"changed": True, "incident": detail}
 
     async def create_inspection_finding(self, data):
         due_at = data.get("due_at") or (datetime.now(timezone.utc) + timedelta(days=7))
@@ -938,7 +1052,7 @@ class PostgresRepository:
                 wo_clauses.append("w.crew_id = %s")
                 wo_params.append(crew_id)
                 wo_clauses.append("w.kind IN ('maintenance', 'repair')")
-                wo_clauses.append("w.status IN ('draft', 'approved', 'in_progress')")
+                wo_clauses.append("w.status IN ('draft', 'approved', 'in_progress', 'done')")
             elif role == "owner":
                 if owner:
                     wo_clauses.append("w.owner = %s")
@@ -1043,7 +1157,7 @@ class PostgresRepository:
         return {"changed": True, "workorder": serialize_row(updated)}
 
     async def complete_workorder(self, workorder_id, note=""):
-        """维保/整改人工核验完成：approved|in_progress → done（不自动关闭巡查隐患，需复查）。"""
+        """维保/整改人工核验完成：in_progress → done（不自动关闭巡查隐患，需复查）。"""
         async with await self._connect() as connection:
             row = await (await connection.execute(
                 "SELECT * FROM ops_workorders WHERE id = %s FOR UPDATE", (workorder_id,)
@@ -1052,7 +1166,7 @@ class PostgresRepository:
                 return None
             if row["status"] == "done":
                 return {"changed": False, "workorder": serialize_row(row)}
-            if row["status"] not in ("approved", "in_progress"):
+            if row["status"] != "in_progress":
                 raise ValueError("workorder_state_conflict")
             summary = row["summary"] if not note else f"{row['summary']}；完成核验：{note}"
             updated = await (await connection.execute(
@@ -1086,6 +1200,8 @@ class PostgresRepository:
                 "SELECT * FROM ops_workorders WHERE finding_id = %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
                 (finding_id,),
             )).fetchone()
+            if not workorder or workorder["status"] != "done":
+                raise ValueError("recheck_workorder_not_done")
             if result == "failed":
                 desc = finding["description"] or ""
                 suffix = note or "复查未通过，继续整改"
@@ -1104,13 +1220,6 @@ class PostgresRepository:
                 """UPDATE inspection_findings SET status = 'closed' WHERE id = %s RETURNING *""",
                 (finding_id,),
             )).fetchone()
-            if workorder and workorder["status"] != "done":
-                wo_summary = workorder["summary"] if not note else f"{workorder['summary']}；复查通过：{note}"
-                workorder = await (await connection.execute(
-                    """UPDATE ops_workorders SET status = 'done', summary = %s
-                    WHERE id = %s RETURNING *""",
-                    (wo_summary, workorder["id"]),
-                )).fetchone()
             return {
                 "changed": True,
                 "finding": serialize_row(updated),

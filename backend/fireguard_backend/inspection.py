@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 # 演示资产指纹：文件名/路径片段 → 隐患模板
@@ -93,8 +93,55 @@ def analyze_inspection(
     enterprise_id: str,
     image_asset: str = "",
     voice_text: str = "",
+    mode: str = "scenario",
+    live_provider: Optional[Callable[[str, str, str], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """根据图片资产与语音文本生成隐患草稿（不落库）。"""
+    """生成隐患草稿（不落库）；Live 不可用时显式回退本地演示识别。"""
+    if mode not in {"scenario", "live"}:
+        raise ValueError("invalid_inspection_mode")
+    fallback_reason = ""
+    if mode == "live" and live_provider:
+        try:
+            result = live_provider(enterprise_id, image_asset, voice_text)
+            required = {"recognized", "abstained", "confidence", "title", "description", "provider", "model_name"}
+            if not isinstance(result, dict) or not required.issubset(result):
+                raise ValueError("vision_provider_invalid_output")
+            return {
+                "category": "unknown",
+                "severity": "medium",
+                "location": "未知",
+                "department": AREA_OWNERS.get(enterprise_id, {}).get("department", "未知"),
+                "owner": AREA_OWNERS.get(enterprise_id, {}).get("owner", "未知"),
+                "tag": "AI 识别",
+                "pin": {"left": 50, "top": 50},
+                "voice_summary": (voice_text or "").strip() or "（无语音备注）",
+                "image_asset": image_asset,
+                "missing_fields": [],
+                "evidence_refs": [],
+                "disclaimer": "识别结果仅供辅助，不替代现场检查与专业判断；派发须人工确认。",
+                **result,
+                "mode": "live",
+                "requested_mode": "live",
+                "fallback_reason": "",
+                "is_simulation": False,
+                "external_system": "vision-provider",
+            }
+        except ValueError as error:
+            fallback_reason = str(error)
+        except Exception:
+            fallback_reason = "vision_provider_failed"
+    elif mode == "live":
+        fallback_reason = "vision_provider_not_configured"
+
+    metadata = {
+        "mode": "scenario",
+        "requested_mode": mode,
+        "provider": "local-demo",
+        "model_name": "deterministic-image-catalog-v1",
+        "fallback_reason": fallback_reason,
+        "is_simulation": True,
+        "external_system": "none",
+    }
     template = _pick_template(image_asset, voice_text)
     owner_info = AREA_OWNERS.get(enterprise_id, {"owner": "未知", "department": "未知", "role": "网格责任人"})
     voice = (voice_text or "").strip()
@@ -118,6 +165,7 @@ def analyze_inspection(
             "missing_fields": ["hazard_type", "location", "severity"],
             "evidence_refs": [],
             "disclaimer": "识别结果仅供辅助，不替代现场检查与专业判断；派发须人工确认。",
+            **metadata,
         }
 
     description = template["description"]
@@ -146,6 +194,7 @@ def analyze_inspection(
             f"owner:{template['owner']}",
         ],
         "disclaimer": "识别结果仅供辅助，不替代现场检查与专业判断；派发须人工确认。",
+        **metadata,
     }
 
 

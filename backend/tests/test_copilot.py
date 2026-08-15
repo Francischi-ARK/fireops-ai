@@ -90,6 +90,7 @@ class FakeCopilotProvider:
         return [
             {"id": "crew-wx-01", "district": "西区", "status": "available"},
             {"id": "crew-wx-02", "district": "东区", "status": "available"},
+            {"id": "crew-wb-01", "district": "西区", "status": "available"},
         ]
 
     async def get_incident(self, incident_id):
@@ -152,6 +153,7 @@ class CopilotSchemaTests(unittest.TestCase):
                 "signal_verification", "incident_response_support",
                 "fault_diagnosis", "gas_release_advisory",
             ))
+            self.assertNotIn("append_incident_activity", scenario["allowed_tools"])
         self.assertTrue(spec["is_simulation"])
         self.assertEqual(spec["external_system"], "none")
 
@@ -220,7 +222,7 @@ class ToolGuardTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.error, "invalid_arguments")
 
-    def test_append_activity_requires_human_approval(self):
+    def test_model_cannot_append_activity_even_with_recorded_approval(self):
         guard, context, provider = make_guard()
         call = ToolCall(
             name="append_incident_activity",
@@ -228,13 +230,14 @@ class ToolGuardTests(unittest.TestCase):
         )
         denied = run(guard.execute(call, context))
         self.assertFalse(denied.ok)
-        self.assertEqual(denied.error, "approval_required")
+        self.assertEqual(denied.error, "unknown_tool")
         self.assertEqual(provider.appended, [])
 
         context.approvals.add("copilot_note")
-        allowed = run(guard.execute(call, context))
-        self.assertTrue(allowed.ok)
-        self.assertEqual(len(provider.appended), 1)
+        still_denied = run(guard.execute(call, context))
+        self.assertFalse(still_denied.ok)
+        self.assertEqual(still_denied.error, "unknown_tool")
+        self.assertEqual(provider.appended, [])
 
     def test_recommend_crew_uses_district(self):
         guard, context, provider = make_guard()
@@ -250,6 +253,7 @@ class ToolGuardTests(unittest.TestCase):
         self.assertEqual(result.data["entries"][0]["kb_id"], "kb-002")
         refs = [ref.ref for ref in context.collected_evidence]
         self.assertIn("kb-002", refs)
+        self.assertIn("第8章", result.evidence[0].note)
 
     def test_evidence_must_come_from_tool_results(self):
         guard, context, provider = make_guard()
@@ -264,6 +268,7 @@ class ToolGuardTests(unittest.TestCase):
         rejected = validate_evidence(plan, context.collected_evidence)
         self.assertEqual(rejected, ["demo/alarm/999"])
         self.assertEqual([e.ref for e in plan.evidence], ["demo/alarm/101"])
+        self.assertEqual(plan.evidence[0].kind, "signal")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,10 @@ class CopilotIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.repository = PostgresRepository(os.environ["FIREGUARD_TEST_DATABASE_URL"])
         await self.repository.init()
+        # 上一次运行若中断，测试库可能残留 busy/on_scene 班组，导致
+        # recommend_crew 推荐结果漂移；开跑前恢复基线，保证可复现。
+        async with await AsyncConnection.connect(os.environ["FIREGUARD_TEST_DATABASE_URL"]) as connection:
+            await connection.execute("UPDATE fire_stations SET status = 'available'")
         self.guard = ToolGuard(CopilotProvider(self.repository))
         raw = json.loads(SCENARIOS_PATH.read_text(encoding="utf-8"))
         self.scenarios = {s["scenario_id"]: s for s in raw["scenarios"]}
@@ -110,19 +114,20 @@ class CopilotIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(draft.ok)
         self.assertTrue(draft.data["is_draft"])
 
-        # Human issues the workorder through the existing API, then the copilot
-        # may record its activity note with the matching approval recorded.
+        # Human issues the workorder through the existing API. Model tool calls
+        # still cannot append timeline activity; approvals use the dedicated API.
         # ponytail: crew-wb-01 keeps this test independent of test_repository_integration,
         # which drives crew-wx-01 in the same shared test database.
         await self.repository.dispatch_incident(incident["id"], "crew-wb-01")
         ctx.approvals.add("copilot_note")
-        appended = await self.guard.execute(ToolCall(
+        denied = await self.guard.execute(ToolCall(
             name="append_incident_activity",
             arguments={"incident_id": incident["id"], "event_type": "copilot_note", "note": "已生成三端交付（模拟）"},
         ), ctx)
-        self.assertTrue(appended.ok)
+        self.assertFalse(denied.ok)
+        self.assertEqual(denied.error, "unknown_tool")
         detail = await self.repository.get_incident(incident["id"])
-        self.assertIn("copilot_note", [row["event_type"] for row in detail["timeline"]])
+        self.assertNotIn("copilot_note", [row["event_type"] for row in detail["timeline"]])
         await self._remove_dispatch(incident["id"])
 
     async def _remove_dispatch(self, incident_id):

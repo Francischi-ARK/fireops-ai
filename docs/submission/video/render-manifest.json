@@ -1,0 +1,161 @@
+{
+  "schema_version": "fireops-video-render/v1",
+  "timeline": "timeline.json",
+  "output": "FireOps-AI-GOAI-demo.mp4",
+  "duration": 92.021333,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "cues": [
+    {
+      "id": "00-cover",
+      "expected_start": 0,
+      "expected_end": 5,
+      "actual_start": 0,
+      "actual_end": 5,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 5.329388,
+      "tempo": 1.171294065934066
+    },
+    {
+      "id": "01-monitoring",
+      "expected_start": 5,
+      "expected_end": 11,
+      "actual_start": 5,
+      "actual_end": 11,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 7.122404,
+      "tempo": 1.283316036036036
+    },
+    {
+      "id": "02-fire-verify",
+      "expected_start": 11,
+      "expected_end": 18,
+      "actual_start": 11,
+      "actual_end": 18,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 6.432154,
+      "tempo": 1
+    },
+    {
+      "id": "03-fire-dispatch",
+      "expected_start": 18,
+      "expected_end": 25,
+      "actual_start": 18,
+      "actual_end": 25,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 6.041859,
+      "tempo": 1
+    },
+    {
+      "id": "04-crew-arrival",
+      "expected_start": 25,
+      "expected_end": 32,
+      "actual_start": 25,
+      "actual_end": 32,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 5.889116,
+      "tempo": 1
+    },
+    {
+      "id": "05-first-report",
+      "expected_start": 32,
+      "expected_end": 38,
+      "actual_start": 32,
+      "actual_end": 38,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 5.471973,
+      "tempo": 1
+    },
+    {
+      "id": "06-copilot-evidence",
+      "expected_start": 38,
+      "expected_end": 45,
+      "actual_start": 38,
+      "actual_end": 45,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 8.949569,
+      "tempo": 1.3663464122137405
+    },
+    {
+      "id": "07-fault-draft",
+      "expected_start": 45,
+      "expected_end": 52,
+      "actual_start": 45,
+      "actual_end": 52,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 7.453424,
+      "tempo": 1.1379273282442748
+    },
+    {
+      "id": "08-fault-done",
+      "expected_start": 52,
+      "expected_end": 59,
+      "actual_start": 52,
+      "actual_end": 59,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 7.570658,
+      "tempo": 1.1558256488549619
+    },
+    {
+      "id": "09-inspection-draft",
+      "expected_start": 59,
+      "expected_end": 66,
+      "actual_start": 59,
+      "actual_end": 66,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 6.136735,
+      "tempo": 1
+    },
+    {
+      "id": "10-owner-rectification",
+      "expected_start": 66,
+      "expected_end": 73,
+      "actual_start": 66,
+      "actual_end": 73,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 5.60322,
+      "tempo": 1
+    },
+    {
+      "id": "11-inspection-closed",
+      "expected_start": 73,
+      "expected_end": 80,
+      "actual_start": 73,
+      "actual_end": 80,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 5.869705,
+      "tempo": 1
+    },
+    {
+      "id": "12-dossier",
+      "expected_start": 80,
+      "expected_end": 85,
+      "actual_start": 80,
+      "actual_end": 85,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 6.438549,
+      "tempo": 1.4150657142857144
+    },
+    {
+      "id": "13-safe-abstention",
+      "expected_start": 85,
+      "expected_end": 89,
+      "actual_start": 85,
+      "actual_end": 89,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 3.808481,
+      "tempo": 1.0728115492957746
+    },
+    {
+      "id": "14-closing",
+      "expected_start": 89,
+      "expected_end": 92,
+      "actual_start": 89,
+      "actual_end": 92,
+      "motion": "deterministic-zoompan",
+      "narration_source_duration": 3.291791,
+      "tempo": 1.2908984313725491
+    }
+  ]
+}

@@ -1,58 +1,82 @@
-# FireOps AI
+# FireOps AI｜工厂消防设备运维 Agent
 
-> 工厂消防设备运维 Agent · GOAI 无界应用赛道（AI+工业制造）参赛作品
-> 全部数据为合成演示数据：不控制真实设备、不自动启动灭火装置、AI 只起草不执行；对外报警（119）由人工执行。
+> GOAI「无界应用」AI+工业制造参赛作品。全部内容为合成演示数据；系统不上控、不自动启动灭火装置、不自动拨打 119。
 
-面向新能源汽车制造工厂：把火警主机 Modbus 报警帧、点位编码表、维保记录与说明书检索串成一条可审计的运维闭环——Agent 完成任务理解、证据补全、故障诊断与工单草稿；核实与派发由消控室 / 值班负责人确认。
+FireOps AI 把火警主机 Modbus 事件、点位编码、维保记录、说明书和巡查隐患接入同一个事件与工单中枢。Agent 负责理解任务、补齐上下文、检索证据、诊断和起草；火警核实、工单派发、开工、完工和复查由人确认。
 
-## 三个亮点
+![FireOps AI 标志](assets/fireops-logo.svg)
 
-1. **Modbus → 证据 → 动作**：解析海湾消防控制器 Modbus RTU 事件帧，映射到点位档案与车间危险源；无依据时明确回答「未知」，虚构证据编号会被服务端拦截。
-2. **Permission-gated Agent**：模型只能起草和推荐；工具白名单、参数 schema、状态机、人工审批四层拦截越权动作（含工单派发）。
-3. **一次事件 · 三端交付**：同一事件编号自动生成消控室值班简报、处置班组任务卡、网格责任人待办，写入同一时间线；可导出 JSON 审计包。
+## 为什么它不是普通告警大屏
 
-产品采用响应式 Web：桌面端用于态势监测、核实与派单，手机端提供固定导航与现场人工确认。
+- **从工业协议开始**：解析含 CRC 的 Modbus RTU 事件帧，再映射到控制器、回路、点位和车间档案。
+- **AI 有证据边界**：工具白名单、参数校验、证据编号校验、状态机和人工审批共同拦截越权；缺少依据时明确拒答。
+- **三条链进入同一中枢**：火警处置、故障/维保、巡查整改都能走到责任人、状态和审计证据闭环。
+- **桌面与手机共用一套流程**：桌面端负责态势、核实与调度，手机端支持班组和网格现场操作。
 
-| 桌面 Copilot | 手机现场确认 |
-| --- | --- |
-| ![桌面端 Copilot 工作台](docs/images/copilot-desktop.png) | ![手机端人工确认链](copilot-mobile-390x844.png) |
+## 已完成能力
+
+1. 火警：`Modbus 帧 → 点位解析 → 人工核实 → 派单 → 签收/出动/到场 → 首报`。
+2. 故障与维保：`故障/逾期 → 手册与记录检索 → 草稿 → 人工派发 → 开工 → 完工`。
+3. 防火巡查：`图片/口述 → 隐患草稿 → 人工派发 → 网格整改 → 巡查复查 → 关闭`。
+4. Copilot：五个离线场景、中枢事件绑定、工具轨迹、证据引用、回退原因和 JSON 审计包。
+5. 单元档案：聚合点位、事件、维保、隐患、工单和下一步业务编号。
+6. 3D 厂区：20 栋、6 类建筑资产和 5 个风险点位；WebGL 失败时自动提供二维档案入口。
+7. 维修历史：完成工单继续保留在维保班组收件箱中，结果可回看、可追溯。
+
+完整页面与操作说明见 [功能与演示说明](docs/product-walkthrough.md)。
 
 ## 快速开始
 
 ```bash
-cd backend
-docker compose up -d --wait postgres   # 容器 fireops-postgres，端口 54330
-uv sync
-DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard \
-  uv run uvicorn fireguard_backend.app:app --host 127.0.0.1 --port 8000
-
-# 另一个终端（项目根目录）
-python3 -m http.server 4173
-# 打开 http://127.0.0.1:4173/#/copilot
+./start-demo.command
+# 浏览器打开 http://127.0.0.1:4173/#/monitoring
 ```
 
-五个演示场景（误报 / 确认火警派单 / 主机故障诊断 / 数据不足拒答 / 气体灭火延时咨询）在 Scenario 模式下离线可复现。Live 模式设置 `COPILOT_MODEL_API_KEY` 后走真实模型，失败自动回退模板。
+脚本可从任意当前目录调用，会启动 PostgreSQL，等待数据库、API 和前端健康后再打开页面。重置演示数据：
 
-可选：用 `scripts/modbus_simulator.py` 向 `POST /gateway/modbus/frames` 注入合成报警帧。
-主演示串联：`#/monitoring` 模拟火警 → 自动进 `#/incidents` 核实派单 → `#/station` 统一收件箱签收；故障帧进维保组维修草稿；巡查/维保工单同一中枢。
-Copilot 可「中枢信号」绑定已有事件，不再旁路新建。
+```bash
+FIREGUARD_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard \
+  PYTHONPATH=backend backend/.venv/bin/python backend/tests/reset_demo_database.py
+```
 
-详细运行指南见 [run-guide](docs/submission/run-guide.md)。
+`FIREGUARD_DATABASE_URL` 是历史兼容环境变量名，不是对外产品名称。
+
+## Scenario 与 Live
+
+Scenario 模式无需外网，可重复运行：误报研判、确认火警、主机故障、数据不足拒答和气体灭火延时咨询。
+
+Live 模式设置 `COPILOT_MODEL_API_KEY` 后使用 OpenAI 兼容接口。未配置、请求失败或模型输出不合格时，系统立即显示原因并回退到确定性计划；AI 仍不能直接修改业务状态。
 
 ## 验证
 
-- 后端 unittest（含 Modbus CRC、网关解析、工具守门、五场景模板、证据链集成）：见 `backend/tests/`
-- 前端冒烟：`scripts/smoke_test.cjs`；五场景 E2E + 390px 手机确认链：`scripts/copilot_e2e.cjs`
-- 评测报告：[eval-report](docs/submission/eval-report.md)
+```bash
+node scripts/engine.test.cjs
+bash scripts/runtime_contract.test.sh
+bash scripts/e2e_contract.test.sh
 
-## 文档
+cd backend
+FIREGUARD_TEST_DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54330/fireguard_test \
+  PYTHONPATH=. .venv/bin/python -m unittest discover -s tests
+```
 
-- **[开发交接 HANDOFF](docs/HANDOFF.md)**（fable5 规划、中枢三链、已完成项、建议后续工作包 — 交给其他 Agent 续作请从这个读）
-- [产品需求 PRD](docs/FireGuard_AI_PRD.md)（历史稿，定位以本 README 为准）
-- [技术架构说明](docs/submission/architecture.md)
-- [数据来源与合规说明](docs/submission/data-compliance.md)
-- [演示场景夹具](demo-data/copilot_scenarios.json) · [Demo 脚本](docs/demo-script.md)
+浏览器合同覆盖 6 个工作台、五场景 Copilot、完整跨页闭环、390×844 手机端、3D 渲染和二维降级。
+
+## 文档与报名材料
+
+- [功能与演示说明](docs/product-walkthrough.md)
+- [开发交接](docs/HANDOFF.md)
+- [技术架构](docs/submission/architecture.md)
+- [数据与安全合规](docs/submission/data-compliance.md)
+- [评测报告](docs/submission/eval-report.md)
+- [运行指南](docs/submission/run-guide.md)
+- [500 字以内项目简介](docs/submission/project-intro-500.md)
+- [GOAI 提交检查表](docs/submission/goai-checklist.md)
+- [90 秒演示脚本](docs/demo-script.md)
+- [11 页参赛 PPTX v3](docs/submission/FireOps-AI-GOAI-v3.pptx)
+- [11 页参赛 PDF v3](docs/submission/FireOps-AI-GOAI-v3.pdf)
+- [90 秒中文配音 Demo v3](docs/submission/FireOps-AI-GOAI-demo-v3.mp4)
+- [视频设计、脚本、分镜与统一时间轴](docs/submission/video/)
 
 ## 许可证
 
-以 [MIT](LICENSE) 发布。合成数据与合成图片为本项目自制。
+代码、文档和合成数据以 [MIT](LICENSE) 发布。第三方前端库与后端依赖沿用各自许可证。

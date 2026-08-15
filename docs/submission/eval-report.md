@@ -6,7 +6,7 @@
 ## 1. 评测对象与方法
 
 - 对象：FireOps AI（工厂消防设备运维 Agent；Scenario + Live 回退）；
-- 方法：后端 unittest（含 Modbus/网关/巡查/收件箱）+ 五场景 Copilot E2E + 跨页中枢 E2E；
+- 方法：97 项后端 unittest（含检索评测、权限控制、Modbus/网关/巡查/收件箱）+ 五场景 Copilot E2E + 跨页中枢 E2E；
 - 数据：全部合成，夹具见 `demo-data/copilot_scenarios.json` 与 `device_points.csv`。
 
 ## 2. 指标定义与结果
@@ -20,17 +20,27 @@
 | 虚构证据拦截 | 模型引用不存在证据被过滤 | 100% | 100% |
 | 回退可用率 | 模型失败仍可完成演示 | 100% | 100% |
 | 协议解析正确率 | Modbus CRC/事件帧编解码往返 | 100% | 100%（test_modbus） |
-| 中枢串联可用 | 监测火警→核实→派单→班组收件箱 | 是 | 是（crosspage_flow_e2e） |
+| 火警闭环可用 | 监测→核实→派单→签收→出动→到场→首报 | 是 | 是（crosspage_flow_e2e） |
+| 维修闭环可用 | 故障草稿→人工派发→开工→完工 | 是 | 是（crosspage_flow_e2e） |
+| 巡查闭环可用 | 识别→人工派发→网格整改→复查关闭 | 是 | 是（crosspage_flow_e2e） |
 | 离线可复现 | Scenario 模式无外网可跑五场景 | 是 | 是（copilot_e2e） |
 | 审计包完整性 | 含输入、轨迹、证据、人工决定、边界声明 | 是 | 是（fireops-audit-pack） |
+| 知识 Top-1 召回 | 28 道有标准证据问题，首条结果命中 | ≥90% | 96.4%（27/28） |
+| 知识 Top-3 召回 | 28 道有标准证据问题，前三条任一命中 | ≥90% | 100%（28/28） |
+| 无依据拒答 | 2 道知识库无答案问题不返回证据 | 100% | 100%（2/2） |
+| 角色越权拦截 | 缺身份返回 401，错误角色返回 403，且不调用仓储写操作 | 100% | 100%（5 项 RBAC API 测试） |
+| 手机端可用 | 390×844 八个关键路由无横向溢出，主动作不小于 44 px | 是 | 是（mobile_e2e） |
+| 3D 降级可用 | 3D 资源失败仍保留二维业务入口 | 是 | 是（monitoring_3d_e2e） |
+| 提交物一致性 | PPT/PDF、92 秒视频与当前 Demo 口径一致 | 是 | 是（submission validators + material consistency） |
 
 ## 3. 已知缺口（诚实声明）
 
 - Live 模式未做大规模质量评测，仅覆盖契约与回退；
 - 巡查识别为演示级规则（证据图资产 + 关键词），非生产级 VLM；语音优先浏览器 Web Speech；
-- 知识检索为关键词匹配 CSV，非向量 RAG（规模适合 Demo，升级路径已标明）；
+- 知识检索已加入元数据过滤、领域同义词和加权重排，但评测集仅 30 题、知识条目仅 15 条，尚不能代表真实工厂泛化；
+- 权限为固定演示身份的服务端 RBAC，尚无密码登录、SSO、多租户和持久化越权审计表；
 - 合成数据规模有限，不代表真实工厂泛化能力。
 
 ## 4. 复现步骤
 
-见 `run-guide.md` 第 7 节。关键命令：`unittest discover`、`scripts/copilot_e2e.cjs`、`scripts/crosspage_flow_e2e.cjs`。
+见 `run-guide.md` 第 7 节。统一浏览器合同入口为 `bash scripts/e2e_contract.test.sh`，每个脚本前都会执行官方演示库 reset。

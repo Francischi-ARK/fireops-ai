@@ -73,7 +73,7 @@ class FakeInspectionRepository:
         row = self.workorders.get(workorder_id)
         if not row:
             return None
-        if row["status"] not in ("approved", "in_progress"):
+        if row["status"] != "in_progress":
             raise ValueError("workorder_state_conflict")
         row = {**row, "status": "done"}
         self.workorders[workorder_id] = row
@@ -89,13 +89,12 @@ class FakeInspectionRepository:
             (item for item in self.workorders.values() if item.get("finding_id") == finding_id),
             None,
         )
+        if not workorder or workorder["status"] != "done":
+            raise ValueError("recheck_workorder_not_done")
         if result == "failed":
             return {"changed": True, "finding": finding, "workorder": workorder, "recheck_result": "failed"}
         finding = {**finding, "status": "closed"}
         self.findings[finding_id] = finding
-        if workorder and workorder["status"] != "done":
-            workorder = {**workorder, "status": "done"}
-            self.workorders[workorder["id"]] = workorder
         return {
             "changed": True, "finding": finding, "workorder": workorder, "recheck_result": "passed",
         }
@@ -117,6 +116,8 @@ class InspectionApiTests(unittest.TestCase):
         # overdue scan uses CopilotProvider.get_maintenance — stub via provider patch
         self.original_provider_ctor = app_module.CopilotProvider
         self.client = TestClient(app_module.app)
+        self.inspector_headers = {"X-FireOps-Actor": "inspector-demo"}
+        self.owner_headers = {"X-FireOps-Actor": "owner-demo"}
 
     def tearDown(self):
         app_module.repository = self.original_repository
@@ -134,37 +135,71 @@ class InspectionApiTests(unittest.TestCase):
             "enterprise_id": "ent-001",
             "image_asset": "assets/evidence-extinguisher-blocked.png",
             "voice_text": "灭火器被物料箱挡住",
-        })
+        }, headers=self.inspector_headers)
         self.assertEqual(created.status_code, 201)
         finding_id = created.json()["finding"]["id"]
 
         dispatched = self.client.post(
             f"/inspection/findings/{finding_id}/dispatch",
             json={"note": "请网格责任人今日处理"},
+            headers=self.inspector_headers,
         )
         self.assertEqual(dispatched.status_code, 200)
         self.assertEqual(dispatched.json()["finding"]["status"], "assigned")
         self.assertEqual(dispatched.json()["workorder"]["kind"], "rectification")
         workorder_id = dispatched.json()["workorder"]["id"]
+        premature_complete = self.client.post(
+            f"/workorders/{workorder_id}/complete",
+            json={"note": "不能跳过开工"}, headers=self.owner_headers,
+        )
+        self.assertEqual(premature_complete.status_code, 409)
+        premature_recheck = self.client.post(
+            f"/inspection/findings/{finding_id}/recheck",
+            json={"result": "passed", "note": "工单尚未完成"}, headers=self.inspector_headers,
+        )
+        self.assertEqual(premature_recheck.status_code, 409)
         started = self.client.post(
             f"/workorders/{workorder_id}/start",
-            json={"note": "网格责任人开始整改"},
+            json={"note": "网格责任人开始整改"}, headers=self.owner_headers,
         )
         self.assertEqual(started.status_code, 200)
         self.assertEqual(started.json()["workorder"]["status"], "in_progress")
         completed = self.client.post(
             f"/workorders/{workorder_id}/complete",
-            json={"note": "现场遮挡已清除"},
+            json={"note": "现场遮挡已清除"}, headers=self.owner_headers,
         )
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.json()["workorder"]["status"], "done")
         rechecked = self.client.post(
             f"/inspection/findings/{finding_id}/recheck",
-            json={"result": "passed", "note": "复查通过，灭火器通道畅通"},
+            json={"result": "passed", "note": "复查通过，灭火器通道畅通"}, headers=self.inspector_headers,
         )
         self.assertEqual(rechecked.status_code, 200)
         self.assertEqual(rechecked.json()["finding"]["status"], "closed")
         self.assertEqual(rechecked.json()["recheck_result"], "passed")
+
+    def test_inspection_provider_and_abstention_are_visible_without_persistence(self):
+        response = self.client.post("/inspection/analyze", json={
+            "enterprise_id": "ent-001",
+            "image_asset": "",
+            "voice_text": "好像有点不对",
+            "mode": "live",
+        })
+        self.assertEqual(response.status_code, 200)
+        draft = response.json()["draft"]
+        self.assertTrue(draft["abstained"])
+        self.assertEqual(draft["provider"], "local-demo")
+        self.assertEqual(draft["fallback_reason"], "vision_provider_not_configured")
+        self.assertEqual(self.repository.findings, {})
+
+        create = self.client.post("/inspection/findings", json={
+            "enterprise_id": "ent-001",
+            "image_asset": "",
+            "voice_text": "好像有点不对",
+            "mode": "live",
+        }, headers=self.inspector_headers)
+        self.assertEqual(create.status_code, 422)
+        self.assertEqual(self.repository.findings, {})
 
     def test_maintenance_scan_creates_draft_workorders(self):
         fake_rows = [{
@@ -189,7 +224,7 @@ class InspectionApiTests(unittest.TestCase):
             response = self.client.post("/maintenance/overdue-scan", json={
                 "enterprise_id": "ent-001",
                 "create_drafts": True,
-            })
+            }, headers=self.inspector_headers)
         finally:
             app_module.CopilotProvider = self.original_provider_ctor
         self.assertEqual(response.status_code, 200)
@@ -199,7 +234,7 @@ class InspectionApiTests(unittest.TestCase):
         workorder_id = body["workorders"][0]["id"]
         approved = self.client.post(
             f"/workorders/{workorder_id}/approve",
-            json={"note": "确认派维保组"},
+            json={"note": "确认派维保组"}, headers=self.inspector_headers,
         )
         self.assertEqual(approved.status_code, 200)
         self.assertEqual(approved.json()["workorder"]["status"], "approved")

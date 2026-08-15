@@ -6,6 +6,8 @@ node_modules/
 .env
 *.log
 .codex/
+tmp/
+*.inspect.ndjson
 # test-script screenshot outputs (regenerable)
 preview.png
 implementation-1440x1024.png

@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
     "可用工具：get_signal_context(event_id), get_site_packet(enterprise_id), "
     "get_maintenance_context(enterprise_id), find_missing_fields(reporter_text,known_fields), "
     "create_verification_draft(event_id,note), search_manual(query,limit), "
-    "recommend_crew(enterprise_id), create_workorder_draft(crew_id,incident_id,event_id,summary), "
+    "recommend_crew(enterprise_id,purpose=response|maintenance), create_workorder_draft(crew_id,incident_id,event_id,summary), "
     "build_role_brief(incident_id,role)。"
     "规则：不编造证据编号，证据只能引用工具返回过的 ref；诊断结论必须附说明书或维保记录依据；"
     "核实、工单派发等高风险动作只生成草稿，绝不自动启动灭火装置或对外报警；"
@@ -49,6 +49,7 @@ class OpenAICompatibleClient:
         self.api_key = api_key if api_key is not None else os.getenv("COPILOT_MODEL_API_KEY", "")
         self.model = model or os.getenv("COPILOT_MODEL_NAME", "Qwen/Qwen3-235B-A22B-Instruct-2507")
         self.timeout = timeout
+        self.configured = bool(self.api_key)
 
     async def complete(self, system_prompt: str, user_prompt: str) -> str:
         body = json.dumps({
@@ -139,7 +140,7 @@ class CopilotEngine:
                 raise ValueError("unknown_scenario")
             return self._template_plan(scenario, create, ctx), TEMPLATE_MODEL_NAME, None
 
-        if self.model_client is not None:
+        if self.model_client is not None and getattr(self.model_client, "configured", True):
             try:
                 raw = await asyncio.wait_for(
                     self.model_client.complete(SYSTEM_PROMPT, self._user_prompt(create, ctx)),
@@ -154,7 +155,7 @@ class CopilotEngine:
             except Exception:
                 fallback = "model_unavailable"
         else:
-            fallback = "model_unavailable"
+            fallback = "model_not_configured"
         return self._template_plan(scenario, create, ctx), TEMPLATE_MODEL_NAME, fallback
 
     def _user_prompt(self, create, ctx) -> str:
@@ -196,20 +197,26 @@ class CopilotEngine:
             )
 
         if sid == "A-false-alarm-paint-shop":
+            calls = [
+                ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
+                ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
+                ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
+            ]
+            steps = ["解析报警帧并定位点位", "比对当日维保测试记录"]
+            if ctx.verification_status == "pending":
+                calls.append(ToolCall(name="create_verification_draft", arguments={
+                    "event_id": create.event_id,
+                    "note": "报警与当日回路测试时间相邻且现场反馈无烟雾，疑似测试或粉尘引起，需现场核实"}))
+                steps.append("生成待核实草稿")
+            else:
+                steps.append("读取已登记的人工核实结果")
             return AgentPlan(
                 intent="signal_verification",
                 missing_fields=list(scenario["expected_missing_fields"]),
-                plan=["解析报警帧并定位点位", "比对当日维保测试记录", "生成待核实草稿"],
-                tool_calls=[
-                    ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
-                    ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
-                    ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
-                    ToolCall(name="create_verification_draft", arguments={
-                        "event_id": create.event_id,
-                        "note": "报警与当日回路测试时间相邻且现场反馈无烟雾，疑似测试或粉尘引起，需现场核实"}),
-                ],
+                plan=steps,
+                tool_calls=calls,
                 risks=["报警与维保测试时间相邻，存在误报可能", "喷涂粉尘作业可能污染探测器"],
-                approval_required=list(approved),
+                approval_required=list(approved) if ctx.verification_status == "pending" else [],
             )
 
         if sid == "C-controller-fault-diagnosis":
@@ -227,7 +234,7 @@ class CopilotEngine:
                     ToolCall(name="get_signal_context", arguments={"event_id": create.event_id}),
                     ToolCall(name="search_manual", arguments={"query": "备电故障 蓄电池 更换", "limit": 3}),
                     ToolCall(name="get_maintenance_context", arguments={"enterprise_id": create.enterprise_id}),
-                    ToolCall(name="recommend_crew", arguments={"enterprise_id": create.enterprise_id}),
+                    ToolCall(name="recommend_crew", arguments={"enterprise_id": create.enterprise_id, "purpose": "maintenance"}),
                     ToolCall(name="create_workorder_draft", arguments={
                         "crew_id": crew_id, "event_id": create.event_id,
                         "summary": "机2主机备电故障：先检查电池连接器与接线；结合停电史与更换记录（2023-06），"
@@ -269,7 +276,7 @@ class CopilotEngine:
             ToolCall(name="find_missing_fields", arguments={"reporter_text": text, "known_fields": {}}),
             ToolCall(name="create_verification_draft", arguments={
                 "event_id": create.event_id, "note": "感烟+手报两点报警且人工确认，建议立即核实并准备先期处置"}),
-            ToolCall(name="recommend_crew", arguments={"enterprise_id": create.enterprise_id}),
+            ToolCall(name="recommend_crew", arguments={"enterprise_id": create.enterprise_id, "purpose": "response"}),
         ]
         steps = ["解析报警帧与点位档案", "汇集车间危险源与处置资源", "推荐片区处置班组"]
         if ctx.verification_status == "confirmed" and ctx.incident_id is not None:

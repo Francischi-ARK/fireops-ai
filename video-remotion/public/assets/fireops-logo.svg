@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">FireOps AI 标志</title>
+  <desc id="desc">厂区平面内的风险点与消防处置路径</desc>
+  <path d="M6 7h24v9h11V10h17v47H43v-9H31v9H6V36h9V26H6Z" fill="none" stroke="#111827" stroke-width="5" stroke-linejoin="miter"/>
+  <path d="M30 7v15h11M15 36h16v12M43 31h15" fill="none" stroke="#111827" stroke-width="5"/>
+  <circle cx="17" cy="20" r="8" fill="#fff" stroke="#E83B3B" stroke-width="4"/>
+  <circle cx="17" cy="20" r="4" fill="#E83B3B"/>
+  <path d="M22 20h13v14h11v15" fill="none" stroke="#6957E8" stroke-width="5" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="m40 46 6 7 6-7Z" fill="#6957E8"/>
+</svg>
