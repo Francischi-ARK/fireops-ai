@@ -46,6 +46,6 @@
 
 - 登录报名系统，确认文件大小、命名和上传数量限制；官网公开页未给出这些口径。
 - 填写申请人及不超过 3 人的团队信息；初赛提交后成员不可更换。
-- 将项目推送到可访问的开源仓库并填写公开 URL。当前 Git remote 仅指向本机目录，尚不能作为评委可访问的开源证明。
+- 报名时填写公开仓库 `https://github.com/Francischi-ARK/fireops-ai` 和在线评委演示 `https://francischi-ark.github.io/fireops-ai/#/copilot`。
 - 粘贴 `project-intro-500.md` 正文后，以报名系统自身计数再次确认不超过 500 字。
 - 上传前播放一次最终 MP4，并用 PowerPoint 或 WPS 打开 PPTX，确认报名电脑字体显示正常。
