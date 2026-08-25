@@ -229,6 +229,50 @@ function nextStationAction(dispatchStatus) {
   }[dispatchStatus] || null;
 }
 
-const api = { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, RULESET };
+function buildFirstResponsePack({ enterprise, profile = {}, devicePoints = [], evidenceRefs = [] }) {
+  const checks = [
+    ["场所地址", Boolean(profile.address), ["enterprise_response_profiles.address"]],
+    ["重点危险源", Boolean(profile.hazards?.length), ["enterprise_response_profiles.hazards"]],
+    ["优先入口", Boolean(profile.access_points?.length), ["enterprise_response_profiles.access_points"]],
+    ["可用水源", Boolean(profile.water_sources?.length), ["enterprise_response_profiles.water_sources"]],
+    ["消防设施", Boolean(profile.facilities?.length), ["enterprise_response_profiles.facilities"]],
+    ["设备点位台账", Boolean(devicePoints.length), devicePoints.length ? devicePoints.map((item) => item.point_id).filter(Boolean) : ["device_points"]],
+  ].map(([label, ready, sources]) => ({ label, ready, sources }));
+  const readyCount = checks.filter((item) => item.ready).length;
+  const sources = [...new Set([...checks.flatMap((item) => item.sources), ...evidenceRefs])];
+  return {
+    schema_version: "fireops-first-response-pack/v1",
+    simulation: true,
+    enterprise: { id: enterprise.id, name: enterprise.name },
+    readiness: {
+      score: Math.round(readyCount / checks.length * 100),
+      ready_count: readyCount,
+      total: checks.length,
+      missing_fields: checks.filter((item) => !item.ready).map((item) => item.label),
+      checks,
+    },
+    site: {
+      address: profile.address || "未知",
+      hazards: profile.hazards || [],
+      access_points: profile.access_points || [],
+      water_sources: profile.water_sources || [],
+      facilities: profile.facilities || [],
+    },
+    agent: {
+      method: "结构化检索 + 缺失字段检查",
+      tool_trace: [
+        { name: "get_enterprise_profile", evidence_refs: ["enterprises", "enterprise_response_profiles.address"] },
+        { name: "get_site_packet", evidence_refs: sources.filter((ref) => ref.startsWith("enterprise_response_profiles.")) },
+        { name: "get_device_context", evidence_refs: checks.at(-1).sources },
+        { name: "check_missing_fields", evidence_refs: sources },
+        { name: "build_external_brief", evidence_refs: sources },
+      ],
+      evidence_refs: sources,
+    },
+    boundaries: ["只生成只读资料草稿", "不控制真实设备", "不替代现场指挥", "对外共享与报警由授权人员确认"],
+  };
+}
+
+const api = { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack, RULESET };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 if (typeof window !== "undefined") window.FireGuardEngine = api;

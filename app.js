@@ -115,6 +115,22 @@ const monitoringProfiles = {
   "ent-003": { district: "东区", online: "99%", signal: "无未核实火警信号", fault: "设备故障 1 次", maintenance: "维保计划正常", freshness: "1 分钟前" },
   "ent-004": { district: "西区", online: "62%", signal: "数据不足", fault: "网关断报，3 个数据域缺失", maintenance: "维保数据未接入", freshness: "30 小时前" },
 };
+const OFFLINE_SITE_PROFILES = {
+  "ent-001": {
+    address: "星澜新能源汽车工厂（虚拟）西区 电池车间厂房",
+    hazards: ["锂电池模组半成品缓存区（合成）", "电芯化成区（合成）"],
+    access_points: ["车间南门（合成）", "车间东门（合成）"],
+    water_sources: ["厂区环网消火栓（合成）", "厂区消防水池（合成）"],
+    facilities: ["自动喷水灭火系统（合成）", "电池测试间气体灭火系统（合成）", "锂电专用灭火器材（合成）"],
+  },
+  "ent-005": {
+    address: "星澜新能源汽车工厂（虚拟）西区 涂装车间厂房",
+    hazards: ["调漆间可燃液体（合成）", "喷涂作业区（合成）"],
+    access_points: ["车间东出口（合成）"],
+    water_sources: ["厂区环网消火栓（合成）"],
+    facilities: ["自动喷水灭火系统（合成）", "调漆间气体灭火系统（合成）"],
+  },
+};
 const monitoringFloorPositions = {
   "ent-001": { left: 50, top: 73, label: "电池测试工位" },
   "ent-005": { left: 25, top: 31, label: "喷漆线 3#" },
@@ -807,6 +823,59 @@ function workflowSupervisionTemplate() {
     </section>`;
 }
 
+function firstResponsePack(company, dossier) {
+  return window.FireGuardEngine.buildFirstResponsePack({
+    enterprise: company,
+    profile: dossier?.profile || OFFLINE_SITE_PROFILES[company.id] || {},
+    devicePoints: dossier?.device_points || [],
+    evidenceRefs: dossier?.evidence_refs || [`enterprise_response_profiles/${company.id}`],
+  });
+}
+
+function firstResponsePackTemplate(company, dossier) {
+  const pack = firstResponsePack(company, dossier);
+  const traceLabels = {
+    get_enterprise_profile: "读取企业基本档案",
+    get_site_packet: "聚合危险源、入口、水源和设施",
+    get_device_context: "读取消防设备点位",
+    check_missing_fields: "检查应急资料缺项",
+    build_external_brief: "生成外部救援资料草稿",
+  };
+  return `
+    <article class="dossier-card dossier-response-pack">
+      <header>
+        <div><span>ENTERPRISE READINESS / AI EVIDENCE</span><h2>企业应急准备与首战资料</h2><p>Agent 只整理企业内部数据、标出缺项并生成只读草稿；对外共享与报警仍由授权人员确认。</p></div>
+        <strong class="readiness-score">${pack.readiness.score}<small>/100</small></strong>
+      </header>
+      <div class="readiness-checks">
+        ${pack.readiness.checks.map((item) => `<div class="${item.ready ? "ready" : "missing"}"><i data-lucide="${item.ready ? "check" : "alert-triangle"}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${item.ready ? "资料已就绪" : "需要企业补录"}</small></span></div>`).join("")}
+      </div>
+      <div class="response-pack-grid">
+        <section>
+          <h3>首战资料草稿</h3>
+          <dl>
+            <div><dt>地址</dt><dd>${escapeHtml(pack.site.address)}</dd></div>
+            <div><dt>重点危险源</dt><dd>${escapeHtml(pack.site.hazards.join("、") || "未知")}</dd></div>
+            <div><dt>优先入口</dt><dd>${escapeHtml(pack.site.access_points.join("、") || "未知")}</dd></div>
+            <div><dt>可用水源</dt><dd>${escapeHtml(pack.site.water_sources.join("、") || "未知")}</dd></div>
+            <div><dt>消防设施</dt><dd>${escapeHtml(pack.site.facilities.join("、") || "未知")}</dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Agent 工具与证据链</h3>
+          <ol class="response-pack-trace">
+            ${pack.agent.tool_trace.map((item) => `<li><i data-lucide="check-circle-2"></i><span><strong>${escapeHtml(traceLabels[item.name] || item.name)}</strong><small>${escapeHtml(item.name)} · ${item.evidence_refs.length} 个来源</small></span></li>`).join("")}
+          </ol>
+        </section>
+      </div>
+      <footer>
+        <label><input id="response-pack-confirm" type="checkbox" /> 我已核对合成数据，同意导出给外部救援力量作为辅助资料</label>
+        <button type="button" class="primary-action" data-action="export-first-response-pack"><i data-lucide="download"></i>人工确认并导出资料包</button>
+        <small>${dossier ? "来源：企业档案、设备点位、事件与工单证据" : "离线演示：使用内置合成场地档案，未连接 119 或真实设备"}</small>
+      </footer>
+    </article>`;
+}
+
 function enterpriseDossierTemplate(enterpriseId) {
   const company = companies.find((item) => item.id === enterpriseId) || selectedCompany();
   const profile = monitoringProfiles[company.id] || {};
@@ -831,6 +900,7 @@ function enterpriseDossierTemplate(enterpriseId) {
         </div>
       </header>
       <div class="dossier-grid">
+        ${firstResponsePackTemplate(company, dossier)}
         <article class="dossier-card">
           <h2>风险画像</h2>
           <dl>
@@ -846,7 +916,7 @@ function enterpriseDossierTemplate(enterpriseId) {
         <article class="dossier-card">
           <h2>设备摘要</h2>
           <ul class="dossier-list">
-            ${companyEquipment.length ? companyEquipment.slice(0, 5).map((item) => `<li><strong>${escapeHtml(item.device_type || item.point_id)}</strong><span>${escapeHtml(item.location)} · 机${item.controller_no}回路${item.loop_no}点位${item.point_no}</span></li>`).join("") : `<li><strong>${enterpriseDossierState.loading ? "正在读取设备台账" : "设备台账暂不可用"}</strong><span>${escapeHtml(enterpriseDossierState.error || "等待后端连接")}</span></li>`}
+            ${companyEquipment.length ? companyEquipment.slice(0, 5).map((item) => `<li><strong>${escapeHtml(item.device_type || item.point_id)}</strong><span>${escapeHtml(item.location)} · 机${item.controller_no}回路${item.loop_no}点位${item.point_no}</span></li>`).join("") : `<li><strong>${enterpriseDossierState.loading ? "正在读取设备台账" : "设备台账暂不可用"}</strong><span>${enterpriseDossierState.error ? "本地演示未连接设备台账" : "等待后端连接"}</span></li>`}
           </ul>
         </article>
         <article class="dossier-card">
@@ -888,7 +958,7 @@ function enterpriseDossierTemplate(enterpriseId) {
 }
 
 async function loadEnterpriseDossier(enterpriseId) {
-  if (enterpriseDossierState.id === enterpriseId && (enterpriseDossierState.loading || enterpriseDossierState.data)) return;
+  if (enterpriseDossierState.id === enterpriseId && (enterpriseDossierState.loading || enterpriseDossierState.data || enterpriseDossierState.error)) return;
   enterpriseDossierState = { id: enterpriseId, data: null, loading: true, error: "" };
   try {
     const response = await fetch(`${MONITORING_API_BASE}/enterprises/${enterpriseId}`);
@@ -899,6 +969,22 @@ async function loadEnterpriseDossier(enterpriseId) {
     enterpriseDossierState = { id: enterpriseId, data: null, loading: false, error: error.message };
   }
   if ((location.hash || "").startsWith(`#/enterprises/${enterpriseId}`)) renderRoute();
+}
+
+function exportFirstResponsePack() {
+  if (!document.querySelector("#response-pack-confirm")?.checked) return showToast("请先核对资料并勾选人工确认");
+  const company = selectedCompany();
+  const dossier = enterpriseDossierState.id === company.id ? enterpriseDossierState.data : null;
+  const pack = {
+    ...firstResponsePack(company, dossier),
+    exported_at: new Date().toISOString(),
+    human_confirmation: { confirmed: true, actor_id: demoActorId },
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: `fireops-first-response-${company.id}.json` });
+  link.click();
+  URL.revokeObjectURL(url);
+  showToast("首战资料包已导出；未向任何外部系统发送");
 }
 
 function guidedEmpty(title, steps) {
@@ -1771,6 +1857,7 @@ function renderWorkflow(issue) {
 }
 
 function handleAction(action, issueId) {
+  if (action === "export-first-response-pack") return exportFirstResponsePack();
   if (action === "confirm-device-signal") return postIncidentAction(`/signals/${selectedSignalEventId}/verification`, { result: "confirmed", note: "人工核实确认（模拟）" }, "已确认火警并建立处置事件，对外报警由人工执行");
   if (action === "dismiss-device-signal") return postIncidentAction(`/signals/${selectedSignalEventId}/verification`, { result: "dismissed", note: "人工核实排除（模拟）" }, "已登记误报，不建立处置事件");
   if (action === "dispatch-incident") {

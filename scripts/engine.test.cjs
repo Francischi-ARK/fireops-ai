@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction } = require("../engine.cjs");
+const { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack } = require("../engine.cjs");
 
 const mode = process.argv[2] || "all";
 
@@ -59,7 +59,29 @@ function testIncidentUi() {
   assert.equal(nextStationAction("arrived"), null);
 }
 
+function testFirstResponsePack() {
+  assert.equal(typeof buildFirstResponsePack, "function", "buildFirstResponsePack is missing");
+  const pack = buildFirstResponsePack({
+    enterprise: { id: "ent-001", name: "电池车间（PACK/化成）" },
+    profile: {
+      address: "星澜新能源汽车工厂（虚拟）西区 电池车间厂房",
+      hazards: ["锂电池模组半成品缓存区（合成）"],
+      access_points: ["车间南门（合成）"],
+      water_sources: [],
+      facilities: ["自动喷水灭火系统（合成）"],
+    },
+    devicePoints: [{ point_id: "pt-01", device_type: "点型感烟探测器" }],
+    evidenceRefs: ["monitoring_events/1"],
+  });
+  assert.equal(pack.schema_version, "fireops-first-response-pack/v1");
+  assert.equal(pack.readiness.score, 83);
+  assert.deepEqual(pack.readiness.missing_fields, ["可用水源"]);
+  assert.ok(pack.agent.tool_trace.every((entry) => entry.evidence_refs.length));
+  assert.ok(pack.boundaries.includes("对外共享与报警由授权人员确认"));
+}
+
 if (mode === "parser" || mode === "all") testParser();
 if (mode === "scoring" || mode === "all") testScoring();
 if (mode === "incident" || mode === "all") testIncidentUi();
+if (mode === "response-pack" || mode === "all") testFirstResponsePack();
 console.log(`engine tests (${mode}): ok`);
