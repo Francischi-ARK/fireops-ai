@@ -16,6 +16,8 @@ DATABASE_URL=postgresql://fireguard:fireguard-demo@127.0.0.1:54329/fireguard \
 
 后端地址为 `http://127.0.0.1:8000`。在项目根目录执行 `python3 -m http.server 4173`，打开 `http://127.0.0.1:4173/#/incidents` 查看总队端，打开 `http://127.0.0.1:4173/#/station` 查看救援站端。
 
+Copilot 默认使用可复现的场景模板。需要记录真实模型运行时，在 `backend/.env` 配置 `COPILOT_MODEL_BASE_URL`、`COPILOT_MODEL_NAME` 和 `COPILOT_MODEL_API_KEY`，然后在页面选择“Live 模型”。模型不可用时系统会安全回退，并在运行结果中保留 `model_name` 与 `fallback_reason`；密钥只放在后端环境变量中，不提交到仓库或前端。
+
 ## 验证
 
 ```bash
