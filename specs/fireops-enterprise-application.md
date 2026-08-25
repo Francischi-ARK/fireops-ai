@@ -20,9 +20,27 @@ Inspection recognition MUST expose the current provider/model, confidence, evide
 
 The enterprise dossier MUST aggregate backend enterprise, point, event, maintenance, finding, workorder, and evidence data. Navigation from the dossier and between operational routes MUST preserve `enterprise_id` and any applicable event, incident, workorder, or finding identifier.
 
+#### Requirement: Offline public monitoring
+
+When the backend is unavailable, the public demo MUST identify itself as fixed synthetic review data and MUST keep event simulation, event filtering, evidence views and floor selection usable without successful network requests.
+
+#### Requirement: Spatial review entry
+
+The monitoring route MUST open on a GLB-backed factory overview and MUST provide a reversible transition into the fixed battery-workshop floor view. Failure to load 3D MUST retain equivalent 2D actions.
+
+#### Requirement: Human-readable evidence
+
+Copilot MUST present a readable run record containing input, evidence, tool calls, human confirmations and result before offering raw JSON as a secondary technical download.
+
 #### Requirement: Complete action contract
 
-Every visible primary action MUST have a working handler or native navigation. Unavailable actions MUST be disabled with a visible prerequisite. Business statuses MUST be shown in Chinese, mutually exclusive transitions MUST not be shown together, and desktop/mobile routes MUST not contain unexplained empty primary regions.
+Every visible primary action MUST have a working handler or native navigation. Unavailable actions MUST be disabled with a visible prerequisite. Business statuses MUST be shown in Chinese, mutually exclusive transitions MUST not be shown together, and desktop/mobile routes MUST not contain unexplained empty primary regions. Monitoring filters, event tabs and floor selectors MUST be operable rather than disabled placeholders.
+
+The rectification inbox MUST be titled `整改待办`, MUST state that it receives inspection findings for correction and review, and when empty MUST expose an action that navigates to `#/inspections` without creating a work order.
+
+The assessment route MUST be titled `消防健康报告`. Without valid assessment data it MUST disable editing and report generation and MUST expose a `使用演示数据` action that loads the fixed assessment and its report.
+
+At 1440×900 and 390×844, the M1 routes MUST have no horizontal overflow. Interactive filters, tabs, floors and spatial actions MUST expose a visible keyboard focus state, MUST activate with Enter or Space, and MUST expose their selected state with the applicable ARIA attribute.
 
 #### Requirement: Reproducible local runtime
 

@@ -102,8 +102,8 @@ function buildScene() {
   }
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x071018);
-  scene.fog = new THREE.FogExp2(0x071018, 0.018);
+  scene.background = new THREE.Color(0xf2f5f7);
+  scene.fog = new THREE.FogExp2(0xf2f5f7, 0.006);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
   const resetView = () => {
     camera.position.set(22, 18, 27);
@@ -114,14 +114,14 @@ function buildScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.22;
+  renderer.toneMappingExposure = 0.96;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.className = "twin-canvas";
   host.prepend(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0x9cc3d9, 0x0a141c, 1.9));
-  const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8f9da6, 1.45));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.55);
   keyLight.position.set(8, 14, 9);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(2048, 2048);
@@ -135,18 +135,18 @@ function buildScene() {
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(46, 36),
-    new THREE.MeshStandardMaterial({ color: 0x0a1821, roughness: 0.9, metalness: 0.1 }),
+    new THREE.MeshStandardMaterial({ color: 0xe5eaee, roughness: 0.95, metalness: 0.02 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
-  const grid = new THREE.GridHelper(42, 42, 0x31505f, 0x172b36);
+  const grid = new THREE.GridHelper(42, 42, 0xb8c4cc, 0xd6dde2);
   grid.position.y = 0.012;
   scene.add(grid);
 
   // 园区主干道（东西向 + 南北向）与中线
-  const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x0d2029, roughness: 0.95 });
-  const lineMaterial = new THREE.MeshBasicMaterial({ color: 0x3a5a68 });
+  const roadMaterial = new THREE.MeshStandardMaterial({ color: 0xcbd3d9, roughness: 0.95 });
+  const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
   [[46, 2.6, 0, 0], [2.6, 34, -1.5, 0]].forEach(([w, d, rx, rz]) => {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMaterial);
     road.rotation.x = -Math.PI / 2;
@@ -173,9 +173,9 @@ function buildScene() {
     [-14, 13, 2, 0.105, 0], [-5.5, 13.5, 0, 0.090, 0], [2.5, 13, 1, 0.055, 1], [11, 13.5, 2, 0.100, 0], [18.5, 13, 5, 0.100, 0],
   ];
   const facadeVariants = [
-    { base: "#22404f", lit: 0.34 },
-    { base: "#1a3040", lit: 0.24 },
-    { base: "#29495a", lit: 0.44 },
+    { base: "#dfe6ea", lit: 0.18 },
+    { base: "#cfd9df", lit: 0.14 },
+    { base: "#e8ecef", lit: 0.22 },
   ].map(({ base, lit }, index) => new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: makeFacadeTexture(base, lit, 97 + index * 13),
@@ -200,12 +200,20 @@ function buildScene() {
 
   // Blender 生成的建筑资产（assets/buildings/generate_buildings.py 可复现）；
   // 加载失败时退化为程序化方块，保证演示不空场
-  const archetypes = ["factory", "office", "warehouse", "mall", "tower", "tanks"];
+  const modelUrls = [
+    ["factory", "./assets/buildings/factory.glb?v=2"],
+    ["office", "./assets/buildings/office.glb?v=2"],
+    ["warehouse", "./assets/buildings/warehouse.glb?v=2"],
+    ["mall", "./assets/buildings/mall.glb?v=2"],
+    ["tower", "./assets/buildings/tower.glb?v=2"],
+    ["tanks", "./assets/buildings/tanks.glb?v=2"],
+  ];
+  const archetypes = modelUrls.map(([name]) => name);
   const layoutRand = seeded(20260807);
   const loader = new GLTFLoader();
-  const loadModel = (name) => new Promise((resolve) =>
-    loader.load(`./assets/buildings/${name}.glb?v=2`, resolve, undefined, () => resolve(null)));
-  Promise.all(archetypes.map(loadModel)).then((gltfs) => {
+  const loadModel = ([, url]) => new Promise((resolve) =>
+    loader.load(url, resolve, undefined, () => resolve(null)));
+  Promise.all(modelUrls.map(loadModel)).then((gltfs) => {
     if (gltfs.some((gltf) => !gltf)) {
       placeFallbackBoxes();
       return;

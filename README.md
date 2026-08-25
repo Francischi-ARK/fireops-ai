@@ -4,9 +4,9 @@
 
 FireOps AI 把火警主机 Modbus 事件、点位编码、维保记录、说明书和巡查隐患接入同一个事件与工单中枢。Agent 负责理解任务、补齐上下文、检索证据、诊断和起草；火警核实、工单派发、开工、完工和复查由人确认。
 
-**在线评委演示：** [https://francischi-ark.github.io/fireops-ai/#/copilot](https://francischi-ark.github.io/fireops-ai/#/copilot)
+**在线评委演示：** [https://francischi-ark.github.io/fireops-ai/#/monitoring](https://francischi-ark.github.io/fireops-ai/#/monitoring)
 
-公开页面无需后端即可运行固定合成场景；本地启动完整服务后会自动切换到数据库工作流。
+公开页面无需后端：先查看可交互工厂总览，再进入电池车间二维消防平面；待核实火警可进入 Copilot，WebGL 不可用时也保留二维入口。本地启动完整服务后会自动切换到数据库工作流。
 
 ![FireOps AI 标志](assets/fireops-logo.svg)
 
@@ -22,7 +22,7 @@ FireOps AI 把火警主机 Modbus 事件、点位编码、维保记录、说明�
 1. 火警：`Modbus 帧 → 点位解析 → 人工核实 → 派单 → 签收/出动/到场 → 首报`。
 2. 故障与维保：`故障/逾期 → 手册与记录检索 → 草稿 → 人工派发 → 开工 → 完工`。
 3. 防火巡查：`图片/口述 → 隐患草稿 → 人工派发 → 网格整改 → 巡查复查 → 关闭`。
-4. Copilot：五个离线场景、中枢事件绑定、工具轨迹、证据引用、回退原因和 JSON 审计包。
+4. Copilot：五个离线场景、中枢事件绑定、工具轨迹、证据引用和五段式运行记录；原始 JSON 作为二级下载。
 5. 单元档案：聚合点位、事件、维保、隐患、工单和下一步业务编号。
 6. 3D 厂区：20 栋、6 类建筑资产和 5 个风险点位；WebGL 失败时自动提供二维档案入口。
 7. 维修历史：完成工单继续保留在维保班组收件箱中，结果可回看、可追溯。

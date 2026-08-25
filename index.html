@@ -52,6 +52,7 @@
       <a href="#/workflow" data-mobile-nav="workflow"><i data-lucide="route"></i><span>流程</span></a>
       <a href="#/station" data-mobile-nav="station"><i data-lucide="siren"></i><span>班组</span></a>
       <a href="#/incidents" data-mobile-nav="incidents"><i data-lucide="radio-tower"></i><span>值班台</span></a>
+      <a href="#/owner" data-mobile-nav="owner"><i data-lucide="user-round-check"></i><span>整改</span></a>
     </nav>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -81,6 +82,14 @@
         <div id="workflow-summary" class="workflow-summary"></div>
         <ol id="workflow-timeline" class="workflow-timeline"></ol>
         <footer><button type="button" data-dialog-close="workflow-dialog" class="dialog-secondary">关闭</button><button id="start-reinspection" type="button" class="primary-action">发起专项复查</button></footer>
+      </div>
+    </dialog>
+
+    <dialog id="run-record-dialog" class="app-dialog run-record-dialog" aria-labelledby="run-record-title">
+      <div class="dialog-card">
+        <header><div><span>COPILOT RUN RECORD</span><h2 id="run-record-title">运行记录</h2></div><button type="button" data-dialog-close="run-record-dialog" aria-label="关闭"><i data-lucide="x"></i></button></header>
+        <div id="run-record-content"></div>
+        <footer><button type="button" class="dialog-secondary" id="run-record-download">下载原始 JSON</button><button type="button" class="primary-action" data-dialog-close="run-record-dialog">完成</button></footer>
       </div>
     </dialog>
 

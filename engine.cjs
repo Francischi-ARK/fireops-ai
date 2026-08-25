@@ -273,6 +273,44 @@ function buildFirstResponsePack({ enterprise, profile = {}, devicePoints = [], e
   };
 }
 
-const api = { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack, RULESET };
+const MONITORING_EVENTS = [
+  { id: "evt-fire-001", enterpriseId: "ent-001", type: "fire", typeLabel: "火警", status: "pending", statusLabel: "待核实", time: "10:24", floor: "2F", point: "电池测试工位", location: "PACK 产线 A1", left: 50, top: 73, devices: ["感烟探测器 PT-02-01-005", "声光警报器 A1-04", "防火卷帘 FJ-02"], trend: [12, 18, 32, 58, 81], history: ["10:24 报警帧接入", "10:24 相邻探测器联查", "10:25 等待人工核实"] },
+  { id: "evt-smoke-002", enterpriseId: "ent-005", type: "alarm", typeLabel: "异常", status: "processing", statusLabel: "处理中", time: "08:48", floor: "1F", point: "喷漆线 3#", location: "喷涂通道", left: 25, top: 31, devices: ["感温探测器 PT-01-03", "排烟风机 PF-01"], trend: [16, 22, 41, 55, 69], history: ["08:48 温度异常", "08:50 班组已受领"] },
+  { id: "evt-fault-003", enterpriseId: "ent-002", type: "fault", typeLabel: "故障", status: "processing", statusLabel: "处理中", time: "07:32", floor: "3F", point: "测试区 B2", location: "总装测试区", left: 51, top: 31, devices: ["消防主机回路 3", "输入输出模块 IO-31"], trend: [7, 12, 18, 26, 37], history: ["07:32 回路故障", "07:35 维保工单已生成"] },
+  { id: "evt-restored-004", enterpriseId: "ent-003", type: "alarm", typeLabel: "告警", status: "closed", statusLabel: "已恢复", time: "昨天", floor: "1F", point: "堆垛机通道", location: "立体仓库", left: 30, top: 70, devices: ["光束探测器 BM-09"], trend: [42, 31, 20, 12, 8], history: ["昨天 23:11 告警恢复", "昨天 23:16 人工复核完成"] },
+  { id: "evt-data-005", enterpriseId: "ent-004", type: "fault", typeLabel: "故障", status: "pending", statusLabel: "待核实", time: "昨天", floor: "2F", point: "冲压线控制柜", location: "冲压车间", left: 75, top: 70, devices: ["ARK 工业网关 GW-04"], trend: [62, 48, 30, 12, 0], history: ["昨天 18:40 网关断报", "昨天 18:42 等待网络核实"] },
+];
+
+function monitoringEvents() {
+  return MONITORING_EVENTS.map((event) => ({ ...event, devices: [...event.devices], trend: [...event.trend], history: [...event.history] }));
+}
+
+function filterMonitoringEvents(events, status = "all") {
+  return status === "all" ? [...events] : events.filter((event) => event.status === status);
+}
+
+function createMonitoringEvent(events, type, enterpriseId, now = new Date()) {
+  const fault = type === "fault";
+  const event = {
+    id: `evt-local-${now.getTime()}`,
+    enterpriseId,
+    type: fault ? "fault" : "fire",
+    typeLabel: fault ? "故障" : "火警",
+    status: "pending",
+    statusLabel: "待核实",
+    time: now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+    floor: "2F",
+    point: fault ? "消防主机备电回路" : "PACK 缓存区感烟点",
+    location: fault ? "消防控制室" : "PACK 产线 A1",
+    left: fault ? 43 : 50,
+    top: fault ? 47 : 73,
+    devices: fault ? ["消防主机机 2", "备电模块 BAT-02"] : ["感烟探测器 PT-02-01-005", "声光警报器 A1-04", "防火卷帘 FJ-02"],
+    trend: fault ? [100, 82, 41, 8, 0] : [8, 16, 37, 65, 92],
+    history: [`${now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 本地模拟${fault ? "故障" : "火警"}`, "等待人工核实"],
+  };
+  return [event, ...events];
+}
+
+const api = { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack, monitoringEvents, filterMonitoringEvents, createMonitoringEvent, RULESET };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 if (typeof window !== "undefined") window.FireGuardEngine = api;

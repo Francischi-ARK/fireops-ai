@@ -102,7 +102,7 @@ const workspaces = [
   { route: "monitoring", role: "消控室 / EHS", icon: "scan-line", title: "工厂消防态势监测", description: "汇聚火警主机 Modbus 事件、点位状态、维保与隐患闭环。", status: "3D Demo" },
   { route: "incidents", role: "消控室值班员", icon: "radio-tower", title: "报警核实与工单派发台", description: "处理合成报警的核实、诊断、工单派发与跟踪反馈。", status: "可演示" },
   { route: "station", role: "处置班组 / 维保组", icon: "siren", title: "班组工单终端", description: "接收处置与维修工单，反馈签收、到场和处理结果。", status: "可演示" },
-  { route: "owner", role: "网格责任人", icon: "user-round-check", title: "网格整改待办", description: "接收巡查派发的整改工单，标记整改完成并等待复查闭环。", status: "可演示" },
+  { route: "owner", role: "车间责任人", icon: "user-round-check", title: "整改待办", description: "接收防火巡查发现的隐患，完成整改后交回巡查员复查。", status: "可演示" },
   { route: "inspections", role: "防火巡查员", icon: "clipboard-check", title: "防火巡查与隐患闭环", description: "拍照识别隐患、语音辅助录入，人工确认后派发网格责任人整改。", status: "可演示" },
   { route: "enterprises/ent-001", role: "EHS 经理", icon: "factory", title: "车间消防档案", description: "查看本车间风险画像、设备台账与未闭环隐患，并跳转到核实/巡查/班组继续处理。", status: "可演示" },
 ];
@@ -144,6 +144,22 @@ let selectedIssueId = "hazard-01";
 let activeRightTab = "hazards";
 let hazardFilter = "all";
 let planZoom = 1;
+let monitoringState = {
+  events: window.FireGuardEngine.monitoringEvents(),
+  selectedId: "evt-fire-001",
+  filter: "all",
+  tab: "location",
+  floor: "2F",
+  spatialLevel: "factory",
+};
+window.FireOpsReview = {
+  setMonitoringEvents(events) {
+    monitoringState.events = events;
+    monitoringState.selectedId = events[0]?.id || null;
+    if (monitoringState.spatialLevel === "workshop" && events[0]?.enterpriseId !== "ent-001") monitoringState.spatialLevel = "factory";
+    renderRoute();
+  },
+};
 let toastTimer;
 let workflowStarted = false;
 const MONITORING_API_BASE = window.FIREGUARD_API_BASE || "http://127.0.0.1:8000";
@@ -408,6 +424,17 @@ async function postMonitoringEvent(eventType, successMessage) {
 async function postDemoModbusFrame(frameHex, { jumpToVerify = true } = {}) {
   const hex = frameHex || demoAlarmFrames[selectedCompanyId];
   if (!hex) return showToast("该单元没有预置报警帧");
+  if (monitoringBackend.status !== "live") {
+    const type = hex === demoFaultFrame ? "fault" : "fire";
+    monitoringState.events = window.FireGuardEngine.createMonitoringEvent(monitoringState.events, type, selectedCompanyId);
+    monitoringState.selectedId = monitoringState.events[0].id;
+    monitoringState.filter = "pending";
+    monitoringState.floor = monitoringState.events[0].floor;
+    monitoringState.tab = "location";
+    showToast(`已加入本地${type === "fault" ? "故障" : "火警"}事件，等待人工核实`);
+    renderRoute();
+    return;
+  }
   try {
     const response = await fetch(`${MONITORING_API_BASE}/gateway/modbus/frames`, {
       method: "POST",
@@ -434,7 +461,7 @@ async function postDemoModbusFrame(frameHex, { jumpToVerify = true } = {}) {
       scheduleIncidentRefresh();
     }
   } catch {
-    showToast("后端未连接，报警帧没有写入数据库");
+    showToast("实时链路暂不可用，已保留当前页面状态");
   }
 }
 
@@ -676,8 +703,8 @@ function ownerInboxTemplate() {
       <header class="station-console-header">
         <div>
           <span>AREA OWNER / RECTIFICATION INBOX</span>
-          <h1 id="owner-console-title">网格责任人待办</h1>
-          <p>仅展示派发给本责任人的整改工单；完成后由防火巡查发起复查闭环</p>
+          <h1 id="owner-console-title">整改待办</h1>
+          <p>接收防火巡查发现的隐患，派给车间责任人整改；完成后由巡查员复查闭环。</p>
         </div>
         <label class="crew-switch">责任人
           <select id="terminal-owner-select">
@@ -693,15 +720,10 @@ function ownerInboxTemplate() {
               <strong>${escapeHtml(item.enterprise_name || "")}</strong>
               <span>${escapeHtml((item.summary || "").slice(0, 40))} · ${escapeHtml(item.status)}</span>
             </button>
-          `).join("") : `<div class="incident-empty">暂无派发整改工单</div>`}
+          `).join("") : `<div class="incident-empty">暂无整改任务</div>`}
         </aside>
         <main class="station-task-detail">
-          ${!selected ? guidedEmpty("网格待办只收「巡查整改」工单", [
-            "打开「防火巡查」→ 新建巡查识别 → 确认派发",
-            "派发后会自动跳到本页，并选中对应责任人",
-            "若列表仍空：把右上角责任人切换为派发时的姓名（如李强）",
-            "整改完成后回到防火巡查做「复查通过并闭环」",
-          ]) : `
+          ${!selected ? `<div class="guided-empty owner-empty"><strong>整改待办是将巡查隐患派给车间责任人的整改任务</strong><p>当前没有待整改事项。可先到防火巡查创建隐患记录，返回后会在这里跟踪整改与复查。</p><button type="button" class="primary-action" data-action="go-inspections">去防火巡查新建任务</button></div>` : `
             <div class="incident-title-row"><div><span>整改 #${selected.workorder_id}</span><h2>${escapeHtml(selected.enterprise_name)}</h2><p>网格责任人 ${escapeHtml(selected.owner || terminalOwnerName)}</p></div><strong>${escapeHtml(selected.status)}</strong></div>
             <section class="station-brief"><div><strong>${escapeHtml(selected.summary)}</strong><small>关联隐患 #${selected.finding_id || "—"}</small></div>
             <p>整改完成后标记完成；复查通过后隐患才正式关闭。</p></section>
@@ -997,49 +1019,72 @@ function guidedEmpty(title, steps) {
 }
 
 function monitoringTemplate() {
-  const company = selectedCompany();
+  const events = window.FireGuardEngine.filterMonitoringEvents(monitoringState.events, monitoringState.filter);
+  const selectedEvent = monitoringState.events.find((event) => event.id === monitoringState.selectedId) || events[0] || monitoringState.events[0];
+  const company = companies.find((item) => item.id === selectedEvent.enterpriseId) || companies[0];
   const profile = monitoringProfiles[company.id];
-  const floorPoint = monitoringFloorPositions[company.id];
-  const summary = monitoringBackend.summary || { enterprise_count: 5, online_rate: 88, pending_signal_count: 4, maintenance_overdue: 4 };
-  const queueCompanies = monitoringBackend.enterpriseIds.map((id) => companies.find((item) => item.id === id)).filter(Boolean);
+  selectedCompanyId = company.id;
+  const counts = {
+    all: monitoringState.events.length,
+    pending: monitoringState.events.filter((event) => event.status === "pending").length,
+    processing: monitoringState.events.filter((event) => event.status === "processing").length,
+  };
+  const floorEvents = events.filter((event) => event.enterpriseId === "ent-001" && (monitoringState.floor === "all" || event.floor === monitoringState.floor));
+  const floorDevices = new Set(floorEvents.flatMap((event) => event.devices));
+  const selectedOnFloor = floorEvents.some((event) => event.id === selectedEvent.id);
+  const pendingFire = selectedEvent.type === "fire" && selectedEvent.status === "pending";
+  const tabLabels = { location: "现场位置", trend: "信号趋势", devices: "联动设备", history: "历史事件" };
+  const panel = monitoringState.tab === "trend" ? `
+    <section class="monitoring-data-panel" data-monitoring-panel="trend"><header><strong>${escapeHtml(company.name)} · ${escapeHtml(selectedEvent.point)} · 信号趋势</strong><span>最近 5 个采样点</span></header><div class="signal-trend-bars">${selectedEvent.trend.map((value, index) => `<div><span>${index + 1}</span><i style="--trend:${value}%"></i><strong>${value}</strong></div>`).join("")}</div></section>
+  ` : monitoringState.tab === "devices" ? `
+    <section class="monitoring-data-panel" data-monitoring-panel="devices"><header><strong>${escapeHtml(company.name)} · ${escapeHtml(selectedEvent.point)} · 联动设备</strong><span>${selectedEvent.devices.length} 台</span></header><ul class="monitoring-data-list">${selectedEvent.devices.map((device, index) => `<li><i data-lucide="${index ? "link" : "radio-tower"}"></i><span><strong>${escapeHtml(device)}</strong><small>${index ? "已联查 · 待人工确认" : "在线 · 信号已接收"}</small></span></li>`).join("")}</ul></section>
+  ` : monitoringState.tab === "history" ? `
+    <section class="monitoring-data-panel" data-monitoring-panel="history"><header><strong>${escapeHtml(company.name)} · ${escapeHtml(selectedEvent.point)} · 历史事件</strong><span>${selectedEvent.statusLabel}</span></header><ol class="monitoring-history-list">${selectedEvent.history.map((entry) => `<li>${escapeHtml(entry)}</li>`).join("")}</ol></section>
+  ` : `
+    <section class="monitoring-location-panel" data-monitoring-panel="location">
+      <div class="monitoring-checks"><strong>FireOps 已检查</strong><span><i data-lucide="check"></i>信号稳定性</span><span><i data-lucide="check"></i>相邻探测器</span><span><i data-lucide="check"></i>联动设备</span><span><i data-lucide="check"></i>设备状态</span></div>
+      <div class="monitoring-floor-summary"><strong>电池车间 · ${monitoringState.floor === "all" ? "全部楼层" : monitoringState.floor} · ${floorEvents.length} 个事件点</strong><span>${floorDevices.size} 台关联设备</span></div>
+      <div class="monitoring-floorplan" style="--alarm-left:${selectedEvent.left}%;--alarm-top:${selectedEvent.top}%">
+        <div class="monitoring-floor-selector" aria-label="楼层筛选">${[["all","全部楼层"],["3F","3F"],["2F","2F"],["1F","1F"]].map(([value,label]) => `<button type="button" data-monitoring-floor="${value}" aria-pressed="${monitoringState.floor === value}" class="${monitoringState.floor === value ? "active" : ""}">${label}</button>`).join("")}</div>
+        <img src="assets/fire-floorplan.png" alt="电池车间消防平面图" />
+        <div class="monitoring-zone-label zone-a">极片车间</div><div class="monitoring-zone-label zone-b">化成车间</div><div class="monitoring-zone-label zone-c">电池车间</div><div class="monitoring-zone-label zone-d">成品仓库</div>
+        ${floorEvents.map((event) => `<button type="button" class="monitoring-event-pin ${event.id === selectedEvent.id ? "active" : ""}" style="--pin-left:${event.left}%;--pin-top:${event.top}%" data-monitoring-event-pin="${event.id}" aria-label="${escapeHtml(event.point)} ${event.typeLabel}"><i data-lucide="${event.type === "fire" ? "flame" : "circle-alert"}"></i></button>`).join("")}
+        ${selectedOnFloor ? pendingFire
+          ? `<button type="button" class="monitoring-alarm-pin" data-action="open-monitoring-copilot"><i data-lucide="flame"></i><span><strong>${escapeHtml(selectedEvent.point)}</strong><small>${escapeHtml(selectedEvent.time)} ${escapeHtml(selectedEvent.typeLabel)}</small></span></button>`
+          : `<div class="monitoring-alarm-pin"><i data-lucide="${selectedEvent.type === "fault" ? "wrench" : "circle-alert"}"></i><span><strong>${escapeHtml(selectedEvent.point)}</strong><small>${escapeHtml(selectedEvent.time)} ${escapeHtml(selectedEvent.statusLabel)}</small></span></div>` : ""}
+      </div>
+    </section>`;
+  const factoryPanel = `
+    <div id="monitoring-3d" class="twin-viewport factory-overview" data-spatial-level="factory" data-selected-company="${company.id}" data-risk-levels="${companies.map((item) => `${item.id}:${item.level}`).join(",")}" role="region" aria-label="星澜新能源汽车工厂三维总览">
+      <div class="twin-loading"><span></span>正在加载厂区建筑模型</div>
+      <div class="factory-overview-copy"><span>FACTORY DIGITAL TWIN</span><strong>星澜新能源汽车工厂</strong><small>点击厂区风险点，或从电池车间进入消防平面</small></div>
+      <button type="button" class="factory-enter-workshop" data-enter-workshop="ent-001"><i data-lucide="factory"></i><span><strong>电池车间</strong><small>PACK / 化成 · 2F 火警待核实</small></span><b>进入电池车间</b></button>
+    </div>`;
   return `
     <section class="monitoring-page" aria-labelledby="monitoring-title">
       <div class="monitoring-layout">
         <aside class="monitoring-list" aria-labelledby="monitoring-list-title">
-          <div class="monitoring-panel-title"><div><h2 id="monitoring-list-title">事件队列 <b>${summary.pending_signal_count}</b></h2></div><i data-lucide="list-filter"></i></div>
-          <div class="monitoring-queue-filters" aria-label="事件筛选"><button class="active" disabled data-disabled-reason="当前演示显示全部事件">全部 ${summary.pending_signal_count}</button><button disabled data-disabled-reason="筛选演示占位">待核实 1</button><button disabled data-disabled-reason="筛选演示占位">处理中 2</button></div>
+          <div class="monitoring-panel-title"><div><h2 id="monitoring-list-title">事件队列 <b>${counts.all}</b></h2></div><i data-lucide="list-filter"></i></div>
+          <div class="monitoring-queue-filters" aria-label="事件筛选">${[["all","全部"],["pending","待核实"],["processing","处理中"]].map(([value,label]) => `<button type="button" data-monitoring-filter="${value}" aria-pressed="${monitoringState.filter === value}" class="${monitoringState.filter === value ? "active" : ""}">${label} ${counts[value]}</button>`).join("")}</div>
           <div class="monitoring-company-list">
-            ${queueCompanies.map((item, index) => `<button type="button" class="monitoring-company ${item.id === company.id ? "active" : ""}" data-monitoring-company="${item.id}" aria-pressed="${item.id === company.id}"><span class="monitoring-event-icon"><i data-lucide="${index === 0 ? "flame" : index === 1 ? "siren" : "circle-alert"}"></i></span><span><small>${index === 0 ? "火警" : item.level === "high" ? "异常" : "告警"} <time>${index === 0 ? "10:24" : index === 1 ? "08:48" : index === 2 ? "07:32" : "昨天"}</time></small><strong>${item.name.replace(/（.*?）/g, "")}</strong><em>${monitoringFloorPositions[item.id]?.label || item.building}</em><small>在线 ${monitoringProfiles[item.id].online} · 指数 ${scoreText(item.score)}</small></span><i data-lucide="chevron-right"></i></button>`).join("")}
+            ${events.map((event) => { const item = companies.find((entry) => entry.id === event.enterpriseId) || companies[0]; return `<button type="button" class="monitoring-company ${event.id === selectedEvent.id ? "active" : ""}" data-monitoring-event="${event.id}" data-status="${event.status}" aria-pressed="${event.id === selectedEvent.id}"><span class="monitoring-event-icon"><i data-lucide="${event.type === "fire" ? "flame" : event.type === "fault" ? "wrench" : "circle-alert"}"></i></span><span><small>${event.typeLabel} <time>${event.time}</time></small><strong>${escapeHtml(item.name.replace(/（.*?）/g, ""))}</strong><em>${escapeHtml(event.floor)} · ${escapeHtml(event.point)}</em><small>${event.statusLabel} · 指数 ${scoreText(item.score)}</small></span><i data-lucide="chevron-right"></i></button>`; }).join("") || `<div class="monitoring-empty"><strong>当前筛选暂无事件</strong><button type="button" data-monitoring-filter="all">查看全部</button></div>`}
           </div>
-          <div class="monitoring-source"><i data-lucide="database"></i><span>${monitoringBackend.status === "live" ? "后端实时连接" : "本地合成数据"} · ${summary.online_rate}% 在线</span></div>
+          <div class="monitoring-source"><i data-lucide="database"></i><span>${monitoringBackend.status === "live" ? "实时数据已连接" : "评审演示模式 · 本地合成数据"}</span></div>
         </aside>
         <section class="twin-panel" aria-labelledby="twin-title">
           <header class="monitoring-focus-header">
-            <div><span>火警 · 待人工核实</span><h1 id="monitoring-title">${escapeHtml(company.name.replace(/（.*?）/g, ""))} PACK 产线 A1</h1><dl><div><dt>报警时间</dt><dd>2026-08-13 10:24:18</dd></div><div><dt>探测器</dt><dd>${escapeHtml(floorPoint.label)}</dd></div><div><dt>位置</dt><dd>2F / 东区 / PACK 产线 A1</dd></div><div><dt>消防指数</dt><dd>${scoreText(company.score)} / 100</dd></div></dl></div>
+            <div><span>${escapeHtml(selectedEvent.typeLabel)} · ${escapeHtml(selectedEvent.statusLabel)}</span><h1 id="monitoring-title">${escapeHtml(company.name.replace(/（.*?）/g, ""))} ${escapeHtml(selectedEvent.location)}</h1><dl><div><dt>事件时间</dt><dd>${escapeHtml(selectedEvent.time)}</dd></div><div><dt>探测点</dt><dd>${escapeHtml(selectedEvent.point)}</dd></div><div><dt>位置</dt><dd>${escapeHtml(selectedEvent.floor)} / ${escapeHtml(profile.district)} / ${escapeHtml(selectedEvent.location)}</dd></div><div><dt>消防指数</dt><dd>${scoreText(company.score)} / 100</dd></div></dl></div>
             <div class="twin-actions"><button type="button" data-action="inject-demo-event"><i data-lucide="radio-tower"></i>模拟火警帧</button><button type="button" data-action="inject-demo-fault"><i data-lucide="wrench"></i>模拟故障</button></div>
           </header>
-          <nav class="monitoring-view-tabs" aria-label="事件视图"><button class="active" disabled data-disabled-reason="当前视图">现场位置</button><button disabled data-disabled-reason="本轮演示聚焦现场位置">信号趋势</button><button disabled data-disabled-reason="本轮演示聚焦现场位置">联动设备</button><button disabled data-disabled-reason="本轮演示聚焦现场位置">历史事件</button></nav>
-          <div class="monitoring-checks"><strong>FireOps 已检查</strong><span><i data-lucide="check"></i>信号稳定性</span><span><i data-lucide="check"></i>相邻探测器</span><span><i data-lucide="check"></i>联动设备</span><span><i data-lucide="check"></i>设备状态</span></div>
-          <div id="monitoring-3d" class="twin-viewport" data-selected-company="${company.id}" data-risk-levels="${queueCompanies.map((item) => `${item.id}:${item.level}`).join(",")}" role="img" aria-label="可旋转的厂区建筑群与各车间消防风险三维视图">
-            <div class="twin-loading"><span></span>${location.protocol === "file:" ? "直接双击打开无法加载三维场景：请在项目目录运行 python3 -m http.server 4173 后访问 http://127.0.0.1:4173/（或双击 start-demo.command）" : "正在加载三维态势"}</div>
-            <div class="monitoring-floorplan" style="--alarm-left:${floorPoint.left}%;--alarm-top:${floorPoint.top}%">
-              <div class="monitoring-floor-selector"><button disabled data-disabled-reason="楼层切换演示占位">全部楼层</button><button disabled data-disabled-reason="楼层切换演示占位">3F</button><button class="active" disabled data-disabled-reason="当前楼层">2F</button><button disabled data-disabled-reason="楼层切换演示占位">1F</button></div>
-              <img src="assets/fire-floorplan.png" alt="电池车间二层消防平面图" />
-              <div class="monitoring-zone-label zone-a">极片车间</div><div class="monitoring-zone-label zone-b">化成车间</div><div class="monitoring-zone-label zone-c">电池车间</div><div class="monitoring-zone-label zone-d">成品仓库</div>
-              <button type="button" class="monitoring-alarm-pin" data-action="verify-signal"><i data-lucide="flame"></i><span><strong>${escapeHtml(floorPoint.label)}</strong><small>10:24:18 火警</small></span></button>
-              <div class="monitoring-map-tools"><button disabled data-disabled-reason="缩放演示占位" aria-label="缩小">−</button><span>100%</span><button disabled data-disabled-reason="缩放演示占位" aria-label="放大">＋</button></div>
-            </div>
-            <nav class="twin-beacon-nav monitoring-beacon-bridge" aria-label="三维风险点位">
-              ${queueCompanies.map((item) => `<button type="button" data-enterprise-beacon="${item.id}" aria-pressed="${item.id === company.id}"><b class="risk-dot ${item.level}"></b>${escapeHtml(item.name)}</button>`).join("")}
-            </nav>
-          </div>
+          ${monitoringState.spatialLevel === "workshop" ? `<div class="monitoring-workshop-nav"><button type="button" data-return-factory><i data-lucide="arrow-left"></i>返回工厂总览</button><span>工厂总览 / 电池车间 / ${escapeHtml(selectedEvent.floor)}</span></div><nav class="monitoring-view-tabs" role="tablist" aria-label="事件视图">${Object.entries(tabLabels).map(([value,label]) => `<button type="button" role="tab" data-monitoring-tab="${value}" aria-selected="${monitoringState.tab === value}" class="${monitoringState.tab === value ? "active" : ""}">${label}</button>`).join("")}</nav><div class="twin-viewport" data-spatial-level="workshop" data-selected-company="${company.id}" role="region" aria-label="电池车间消防空间视图">${panel}</div>` : factoryPanel}
         </section>
         <aside class="monitoring-detail" aria-labelledby="monitoring-detail-title">
           <div class="detail-eyebrow"><h2 id="monitoring-detail-title">证据摘要</h2><strong>5/5</strong></div>
           <section class="monitoring-evidence-summary" aria-label="证据摘要">
             ${[["chart-no-axes-column-increasing","信号趋势"],["radio-tower","相邻探测器"],["link","联动设备"],["video","视频复核"],["battery-charging","设备状态"]].map(([icon,label]) => `<div><i data-lucide="${icon}"></i><strong>${label}</strong><span>已检查 <i data-lucide="circle-check"></i></span></div>`).join("")}
           </section>
-          <section class="monitoring-human-gate"><header><strong>待人工核实</strong><span>必须</span></header><p>请现场或视频确认是否存在火情。</p><ul><li>确认有火情，进入应急处置流程</li><li>如为误报，记录原因并关闭</li></ul><button class="monitoring-primary" type="button" data-action="verify-signal"><i data-lucide="shield-alert"></i>确认火情，启动处置</button><button class="monitoring-secondary" type="button" data-action="verify-signal">误报，进入核实台</button></section>
+          ${pendingFire ? `<section class="monitoring-human-gate"><header><strong>待人工核实</strong><span>必须</span></header><p>请现场或视频确认是否存在火情。</p><ul><li>进入 Copilot 补齐证据并生成处置草案</li><li>如为误报，登记原因并关闭事件</li></ul><button class="monitoring-primary" type="button" data-action="open-monitoring-copilot"><i data-lucide="shield-alert"></i>进入 Copilot 核实处置</button><button class="monitoring-secondary" type="button" data-action="dismiss-monitoring-event">登记误报并关闭</button></section>`
+            : `<section class="monitoring-human-gate monitoring-state-card"><header><strong>${selectedEvent.status === "closed" ? "事件已恢复" : selectedEvent.type === "fault" && selectedEvent.status === "pending" ? "待人工排障" : selectedEvent.type === "fault" ? "故障处理中" : "事件处理中"}</strong><span>${escapeHtml(selectedEvent.statusLabel)}</span></header><p>${selectedEvent.status === "closed" ? "该事件已完成复核并恢复，处置记录保留在历史事件中。" : selectedEvent.type === "fault" ? "该事件按设备维修流程处理，不进入火警确认与应急派单。" : "责任班组已受领，请在流程监管中查看后续进度。"}</p></section>`}
           <section class="monitoring-recommendation"><strong><i data-lucide="clipboard-check"></i>建议行动</strong><ol><li>通知现场人员前往核实</li><li>准备灭火器材，等待支援</li></ol></section>
           <button class="monitoring-dossier-link" type="button" data-action="company-overview">查看 ${escapeHtml(company.name)} 档案 <i data-lucide="arrow-up-right"></i></button>
         </aside>
@@ -1210,14 +1255,19 @@ function equipmentPanelContent() {
 function reportTemplate() {
   const company = selectedCompany();
   const assessment = company.id === latestAssessment.enterpriseId ? latestAssessment : null;
-  const score = assessment?.totalScore ?? company.score;
-  const level = assessment?.riskLevel || company.level;
-  const rules = assessment?.triggeredRules || [];
+  if (!assessment) return `
+    <section class="report-page report-empty-page">
+      <header class="report-header"><div><span>FIRE SAFETY ASSESSMENT</span><h1>${escapeHtml(company.name)}消防健康报告</h1><p>用于完成风险评分后的研判，以及月度、季度消防复盘。</p></div><a href="#/inspections" class="secondary-action"><i data-lucide="arrow-left"></i>返回防火巡查</a></header>
+      <div class="report-empty-state"><i data-lucide="file-warning"></i><h2>暂无评分数据</h2><p>当前车间还没有可用于生成报告的结构化评分。请先导入数据，或载入固定演示数据查看完整报告。</p><button type="button" class="primary-action" data-action="use-demo-assessment">使用演示数据</button><small>演示数据不会写入数据库，也不代表真实检查结论。</small></div>
+    </section>`;
+  const score = assessment.totalScore;
+  const level = assessment.riskLevel;
+  const rules = assessment.triggeredRules || [];
   return `
     <section class="report-page">
-        <header class="report-header"><div><span>结构化模板生成 · ${assessment?.ruleVersion || DEMO_RULESET}</span><h1>${company.name}消防设备健康分析报告</h1><p>数据截止 ${assessment?.dataCutoff?.replace("T", " ").slice(0, 16) || DATA_CUTOFF} · 当前得分 ${scoreText(score)} · ${riskLabel(level)}</p></div><a href="#/inspections" class="secondary-action"><i data-lucide="arrow-left"></i>返回防火巡查工具</a></header>
+        <header class="report-header"><div><span>结构化模板生成 · ${assessment.ruleVersion || DEMO_RULESET}</span><h1>${escapeHtml(company.name)}消防健康报告</h1><p>用于风险评分后或周期复盘 · 数据截止 ${assessment.dataCutoff?.replace("T", " ").slice(0, 16) || DATA_CUTOFF} · 当前得分 ${scoreText(score)} · ${riskLabel(level)}</p></div><a href="#/inspections" class="secondary-action"><i data-lucide="arrow-left"></i>返回防火巡查</a></header>
       <div class="report-layout">
-        <aside class="report-facts"><h2>结构化事实</h2><div><span>触发规则</span><strong>${rules.length}</strong></div><div><span>累计扣分</span><strong>${score === null ? "—" : 100 - score}</strong></div><div><span>原始证据</span><strong>${rules.reduce((sum, rule) => sum + rule.evidence.length, 0)}</strong></div><div><span>数据状态</span><strong>${level === "unrated" ? "不足" : "完整"}</strong></div><p>输入指纹 ${assessment?.inputHash || "未导入"}<br />以上字段来自确定性规则，报告不得改写数值。</p></aside>
+        <aside class="report-facts"><h2>结构化事实</h2><div><span>触发规则</span><strong>${rules.length}</strong></div><div><span>累计扣分</span><strong>${score === null ? "—" : 100 - score}</strong></div><div><span>原始证据</span><strong>${rules.reduce((sum, rule) => sum + rule.evidence.length, 0)}</strong></div><div><span>数据状态</span><strong>${level === "unrated" ? "不足" : "完整"}</strong></div><p>输入指纹 ${assessment.inputHash || "演示固定输入"}<br />以上字段来自确定性规则，报告不得改写数值。</p></aside>
         <article class="report-document"><div class="document-meta"><span>报告状态：草稿</span><button type="button" data-action="save-report">保存修订</button></div><textarea id="report-editor">${reportText(company, assessment)}</textarea><div class="document-actions"><button type="button" data-action="regenerate">重新生成</button><button class="primary-action" type="button" data-action="confirm-report">确认报告</button></div></article>
       </div>
     </section>
@@ -1300,12 +1350,29 @@ function renderThreeDFallback(host) {
   if (!host.querySelector(".twin-fallback")) host.insertAdjacentHTML("beforeend", `
     <div class="twin-fallback">
       <strong>三维态势暂不可用</strong>
-      <span>业务数据与处置流程不受影响，可继续查看当前车间档案。</span>
-      <a href="#/enterprises/${selectedCompanyId}">打开二维车间档案</a>
+      <span>仍可通过二维入口完成评审流程。</span>
+      <button type="button" data-enter-workshop="ent-001">进入电池车间二维平面</button>
     </div>`);
+  bindSpatialActions();
+}
+
+function bindSpatialActions() {
+  app.querySelectorAll("[data-enter-workshop]").forEach((button) => button.addEventListener("click", () => {
+    if (button.dataset.enterWorkshop !== "ent-001") return showToast("本阶段开放电池车间，其余工艺车间将在下一阶段补齐");
+    selectedCompanyId = "ent-001";
+    monitoringState.selectedId = monitoringState.events.find((event) => event.enterpriseId === "ent-001")?.id || monitoringState.selectedId;
+    monitoringState.floor = "2F";
+    monitoringState.spatialLevel = "workshop";
+    renderRoute();
+  }));
+  app.querySelectorAll("[data-return-factory]").forEach((button) => button.addEventListener("click", () => {
+    monitoringState.spatialLevel = "factory";
+    renderRoute();
+  }));
 }
 
 function bindDynamicActions() {
+  bindSpatialActions();
   app.querySelectorAll("[data-signal-select]").forEach((button) => button.addEventListener("click", () => {
     selectedSignalEventId = Number(button.dataset.signalSelect); renderRoute();
   }));
@@ -1351,6 +1418,35 @@ function bindDynamicActions() {
   }));
   app.querySelectorAll("[data-monitoring-company]").forEach((button) => button.addEventListener("click", () => {
     selectedCompanyId = button.dataset.monitoringCompany;
+    renderRoute();
+  }));
+  app.querySelectorAll("[data-monitoring-filter]").forEach((button) => button.addEventListener("click", () => {
+    monitoringState.filter = button.dataset.monitoringFilter;
+    const visible = window.FireGuardEngine.filterMonitoringEvents(monitoringState.events, monitoringState.filter);
+    if (visible.length && !visible.some((event) => event.id === monitoringState.selectedId)) {
+      monitoringState.selectedId = visible[0].id;
+      monitoringState.floor = visible[0].floor;
+    }
+    const selected = monitoringState.events.find((event) => event.id === monitoringState.selectedId);
+    if (monitoringState.spatialLevel === "workshop" && selected?.enterpriseId !== "ent-001") monitoringState.spatialLevel = "factory";
+    renderRoute();
+  }));
+  app.querySelectorAll("[data-monitoring-event], [data-monitoring-event-pin]").forEach((button) => button.addEventListener("click", () => {
+    monitoringState.selectedId = button.dataset.monitoringEvent || button.dataset.monitoringEventPin;
+    const event = monitoringState.events.find((item) => item.id === monitoringState.selectedId);
+    if (event) {
+      selectedCompanyId = event.enterpriseId;
+      monitoringState.floor = event.floor;
+      if (monitoringState.spatialLevel === "workshop" && event.enterpriseId !== "ent-001") monitoringState.spatialLevel = "factory";
+    }
+    renderRoute();
+  }));
+  app.querySelectorAll("[data-monitoring-tab]").forEach((button) => button.addEventListener("click", () => {
+    monitoringState.tab = button.dataset.monitoringTab;
+    renderRoute();
+  }));
+  app.querySelectorAll("[data-monitoring-floor]").forEach((button) => button.addEventListener("click", () => {
+    monitoringState.floor = button.dataset.monitoringFloor;
     renderRoute();
   }));
   app.querySelectorAll("[data-enterprise-beacon]").forEach((button) => button.addEventListener("click", () => {
@@ -1446,6 +1542,7 @@ function bindDynamicActions() {
     else if (action === "reset") resetCopilot();
     else if (action === "dispatch") confirmCopilotDispatch();
     else if (action === "offline-archive") archiveOfflineJudgeDemo();
+    else if (action === "view-record") openCopilotRunRecord();
     else if (action === "export-audit") exportCopilotAuditPack();
   }));
   app.querySelectorAll("[data-copilot-verify]").forEach((button) => button.addEventListener("click", () => {
@@ -1458,6 +1555,7 @@ const expectedCsvFiles = ["alarm_events.csv", "enterprises.csv", "findings.csv",
 function bindDialogs() {
   const fileInput = document.querySelector("#csv-files");
   const runImport = document.querySelector("#run-import");
+  document.querySelector("#run-record-download")?.addEventListener("click", exportCopilotAuditPack);
   fileInput.addEventListener("change", () => {
     const names = [...fileInput.files].map((file) => file.name).sort();
     document.querySelector("#import-file-list").textContent = names.length ? names.join(" · ") : "尚未选择文件";
@@ -1857,6 +1955,25 @@ function renderWorkflow(issue) {
 }
 
 function handleAction(action, issueId) {
+  if (action === "go-inspections") {
+    location.hash = "#/inspections";
+    return;
+  }
+  if (action === "open-monitoring-copilot") {
+    const event = monitoringState.events.find((item) => item.id === monitoringState.selectedId);
+    if (!event || event.type !== "fire" || event.status !== "pending") return showToast("当前事件不需要火警核实");
+    event.history = [...event.history, "人工进入 Copilot 核实与处置"];
+    location.hash = `#/copilot?source_event=${encodeURIComponent(event.id)}`;
+    return;
+  }
+  if (action === "dismiss-monitoring-event") {
+    const event = monitoringState.events.find((item) => item.id === monitoringState.selectedId);
+    if (!event || event.type !== "fire" || event.status !== "pending") return showToast("当前事件不能登记为误报");
+    Object.assign(event, { status: "closed", statusLabel: "已排除", history: [...event.history, "人工登记误报并关闭"] });
+    monitoringState.filter = "all";
+    renderRoute();
+    return showToast("已登记误报，未建立处置事件");
+  }
   if (action === "export-first-response-pack") return exportFirstResponsePack();
   if (action === "confirm-device-signal") return postIncidentAction(`/signals/${selectedSignalEventId}/verification`, { result: "confirmed", note: "人工核实确认（模拟）" }, "已确认火警并建立处置事件，对外报警由人工执行");
   if (action === "dismiss-device-signal") return postIncidentAction(`/signals/${selectedSignalEventId}/verification`, { result: "dismissed", note: "人工核实排除（模拟）" }, "已登记误报，不建立处置事件");
@@ -1909,6 +2026,12 @@ function handleAction(action, issueId) {
     return;
   }
   if (action === "save-report") return showToast("报告修订已保存到当前演示会话");
+  if (action === "use-demo-assessment") {
+    const company = selectedCompany();
+    latestAssessment = { ...latestAssessment, enterpriseId: company.id, enterpriseName: company.name, inputHash: `fg-demo-${company.id}` };
+    renderRoute();
+    return showToast("已载入固定演示评分，不会写入数据库");
+  }
   if (action === "regenerate") {
     const editor = document.querySelector("#report-editor");
     if (editor) editor.value = reportText(selectedCompany(), selectedCompanyId === latestAssessment.enterpriseId ? latestAssessment : null);
@@ -1917,8 +2040,8 @@ function handleAction(action, issueId) {
   if (action === "confirm-report") return showToast("报告已确认（仅限演示）");
   if (action === "ranking-help") return showToast("风险线索用于安排巡查优先级，不替代现场检查结论");
   if (action === "verify-signal") {
-    // 真正走网关火警帧 → 待核实队列 → 报警核实台（不再只写一条无用的 verification_requested）
-    return postDemoModbusFrame(demoAlarmFrames[selectedCompanyId]);
+    location.hash = "#/incidents";
+    return;
   }
   if (action === "inject-demo-event") return postDemoModbusFrame();
   if (action === "inject-demo-fault") return postDemoModbusFrame(demoFaultFrame, { jumpToVerify: false });
@@ -1977,8 +2100,14 @@ function runSelfCheck() {
 
 window.addEventListener("fireguard:enterprise-selected", (event) => {
   if (!companies.some((company) => company.id === event.detail?.id)) return;
-  selectedCompanyId = event.detail.id;
-  renderRoute();
+  if (event.detail.id === "ent-001") {
+    selectedCompanyId = "ent-001";
+    monitoringState.spatialLevel = "workshop";
+    monitoringState.selectedId = monitoringState.events.find((item) => item.enterpriseId === "ent-001")?.id || monitoringState.selectedId;
+    renderRoute();
+  } else {
+    showToast("本阶段先开放电池车间，其他工艺车间将在下一阶段补齐");
+  }
 });
 
 function buildOfflineCopilotRun(stage = "verification") {
@@ -2366,7 +2495,27 @@ function exportCopilotAuditPack() {
   const link = Object.assign(document.createElement("a"), { href: url, download: `fireops-audit-run-${run.run_id}.json` });
   link.click();
   URL.revokeObjectURL(url);
-  showToast("可审计事件包已导出");
+  showToast("原始 JSON 已下载");
+}
+
+function openCopilotRunRecord() {
+  const run = copilotState.run;
+  const scenario = selectedCopilotScenario();
+  if (!run || !scenario) return;
+  const toolLabels = {
+    get_signal_context: "读取报警与核实状态", get_site_packet: "读取车间与首战资料",
+    get_maintenance_context: "核对设备维保记录", find_missing_fields: "检查缺失信息",
+    create_verification_draft: "生成待人工核实草稿", recommend_crew: "匹配可用处置班组",
+    create_workorder_draft: "生成待人工批准工单", build_role_brief: "生成岗位任务卡",
+  };
+  document.querySelector("#run-record-content").innerHTML = `
+    <section data-copilot-run-section="input"><h3>输入</h3><p>${escapeHtml(scenario.input.reporter_text)}</p><small>事件 ${escapeHtml(copilotState.eventId || run.run_id)} · 固定合成数据</small></section>
+    <section data-copilot-run-section="evidence"><h3>证据</h3><ul>${run.plan.evidence.map((item) => `<li><strong>${escapeHtml(item.note || item.kind)}</strong><span>${escapeHtml(item.ref)}</span></li>`).join("")}</ul></section>
+    <section data-copilot-run-section="tools"><h3>工具调用</h3><ol>${run.trace.map((item) => `<li><strong>${escapeHtml(toolLabels[item.name] || item.name)}</strong><span>${item.ok ? "完成" : "未完成"}</span></li>`).join("")}</ol></section>
+    <section data-copilot-run-section="human"><h3>人工确认</h3><ul><li>火警核实：${copilotState.verification ? (copilotState.verification === "confirmed" ? "已确认" : "已排除") : "等待值班员确认"}</li><li>工单派发：${copilotState.dispatch ? "已由授权人员批准" : "等待授权人员批准"}</li></ul></section>
+    <section data-copilot-run-section="result"><h3>结果</h3><p>${copilotState.phase === "archived" ? "事件已完成人工核验并归档。" : copilotState.phase === "dispatch" ? "处置草稿已生成，等待人工派单。" : "核实草稿已生成，等待人工确认。"}</p><small>AI 只整理证据和生成草稿，不控制真实设备，不替代现场决策。</small></section>`;
+  document.querySelector("#run-record-dialog").showModal();
+  refreshIcons();
 }
 
 function copilotTemplate() {
@@ -2478,7 +2627,8 @@ function copilotRunTemplate() {
         <span class="copilot-badge">模型：${escapeHtml(run.model_name)}</span>
         ${run.fallback_reason ? `<span class="copilot-badge copilot-badge-warn">模型不可用，已回退模板（${escapeHtml(run.fallback_reason)}）</span>` : ""}
         <span class="copilot-badge">运行 #${run.run_id} · 模拟</span>
-        <button type="button" class="secondary-action copilot-audit-action" data-copilot-action="export-audit"><i data-lucide="download"></i>导出可审计事件包</button>
+        <button type="button" class="primary-action copilot-record-action" data-copilot-action="view-record"><i data-lucide="list-tree"></i>查看运行记录</button>
+        <button type="button" class="secondary-action copilot-audit-action" data-copilot-action="export-audit"><i data-lucide="download"></i>下载原始 JSON</button>
       </div>
       <div class="copilot-grid">
         <section class="copilot-panel">
@@ -2557,7 +2707,7 @@ function copilotPhaseTemplate() {
         <span>DEMO COMPLETE</span><h2><i data-lucide="badge-check"></i>离线评委演示已闭环</h2>
         <p>同一事件已完成：AI 研判 → 人工核实 → 人工派单 → 班组反馈 → 人工归档。</p>
         <ol>${copilotState.judgeProgress.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
-        <div class="copilot-actions"><button type="button" class="secondary-action" data-copilot-action="export-audit"><i data-lucide="download"></i>导出审计包</button><button type="button" class="primary-action" data-copilot-action="reset"><i data-lucide="rotate-ccw"></i>重新演示</button></div>
+        <div class="copilot-actions"><button type="button" class="primary-action" data-copilot-action="view-record"><i data-lucide="list-tree"></i>查看运行记录</button><button type="button" class="secondary-action" data-copilot-action="export-audit"><i data-lucide="download"></i>下载原始 JSON</button><button type="button" class="secondary-action" data-copilot-action="reset"><i data-lucide="rotate-ccw"></i>重新演示</button></div>
       </section>`;
   }
   if (copilotState.phase === "abstained") {
