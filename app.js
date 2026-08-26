@@ -718,6 +718,12 @@ function incidentErrorMessage(code) {
   }[code] || code;
 }
 
+function workorderStatusLabel(status, kind = "") {
+  if (status === "done" && kind === "maintenance") return "待设施部门验收";
+  if (status === "done" && kind === "rectification") return "待巡查复查";
+  return { draft: "待审批", approved: "待开工", in_progress: "处理中", done: "已完成", closed: "已闭环" }[status] || status;
+}
+
 function timelineTemplate(incident) {
   if (!incident?.timeline?.length) return `<div class="incident-empty">暂无事件时间线</div>`;
   return `<ol class="incident-timeline">${incident.timeline.map((item) => `<li><time>${incidentTime(item.occurred_at)}</time><strong>${escapeHtml(item.event_type)}</strong><span>${escapeHtml(item.actor)}${item.note ? ` · ${escapeHtml(item.note)}` : ""}</span></li>`).join("")}</ol>`;
@@ -797,7 +803,7 @@ function stationTerminalTemplate() {
           ${inbox.length ? inbox.map((item) => `
             <button type="button" data-inbox-select="${item.inbox_id}" class="${item.inbox_id === selected?.inbox_id ? "active" : ""}">
               <strong>${kindLabel[item.kind] || item.kind} · ${escapeHtml(item.enterprise_name || "")}</strong>
-              <span>${escapeHtml((item.summary || "").slice(0, 40))} · ${escapeHtml(item.status)}</span>
+              <span>${escapeHtml((item.summary || "").slice(0, 40))} · ${escapeHtml(workorderStatusLabel(item.status, item.kind))}</span>
             </button>
           `).join("") : `<div class="incident-empty">暂无派发工单</div>`}
         </aside>
@@ -815,13 +821,13 @@ function stationTerminalTemplate() {
             ${task.dispatch.status === "arrived" && !task.report ? `<section class="first-report"><h3>现场处理反馈</h3><textarea id="report-situation" maxlength="300" placeholder="填写现场情况与处理结果（1–300 字）"></textarea><select id="report-people"><option value="unknown">人员情况未知</option><option value="no_risk">无被困风险</option><option value="at_risk">存在风险</option></select><button type="button" data-action="submit-first-report">提交反馈</button></section>` : task.report && task.status !== "closed" ? `<div class="report-received"><strong>现场反馈已提交</strong><span>${escapeHtml(task.report.situation)} · 下一步由消控室值班员核验归档</span></div><button type="button" class="station-action" data-workflow-continue data-actor="duty-demo" data-incident-id="${task.id}" data-route="#/incidents?incident_id=${task.id}">交回消控室核验归档</button>` : task.report ? `<div class="report-received"><strong>事件已归档</strong><span>${escapeHtml(task.report.situation)}</span></div>` : ""}
           ` : ""}
           ${selected?.source === "ops_workorder" ? `
-            <div class="incident-title-row"><div><span>OPS #${selected.workorder_id}</span><h2>${escapeHtml(selected.enterprise_name)}</h2><p>${kindLabel[selected.kind] || selected.kind}工单</p></div><strong>${escapeHtml(selected.status)}</strong></div>
+            <div class="incident-title-row"><div><span>OPS #${selected.workorder_id}</span><h2>${escapeHtml(selected.enterprise_name)}</h2><p>${kindLabel[selected.kind] || selected.kind}工单</p></div><strong>${escapeHtml(workorderStatusLabel(selected.status, selected.kind))}</strong></div>
             <section class="station-brief"><div><strong>${escapeHtml(selected.summary)}</strong><small>责任：${escapeHtml(selected.owner || selected.crew_id || "—")}</small></div>
             <p>来自统一工单中枢；草稿需人工确认后派发生效，完工需人工核验。</p></section>
             ${selected.status === "draft" ? `<button type="button" class="station-action" data-action="approve-inbox-workorder" data-workorder-id="${selected.workorder_id}">确认派发（人工）</button>` : ""}
             ${selected.status === "approved" ? `<button type="button" class="station-action" data-action="start-inbox-workorder" data-workorder-id="${selected.workorder_id}">开始处理</button>` : ""}
-            ${selected.status === "in_progress" ? `<button type="button" class="station-action" data-action="complete-inbox-workorder" data-workorder-id="${selected.workorder_id}">完成核验（人工）</button>` : ""}
-            ${!["draft", "approved", "in_progress"].includes(selected.status) ? `<div class="report-received"><strong>工单状态：${escapeHtml(selected.status)}</strong><span>本班组闭环完成</span></div>` : ""}
+            ${selected.status === "in_progress" ? `<button type="button" class="station-action" data-action="complete-inbox-workorder" data-workorder-id="${selected.workorder_id}">${selected.kind === "maintenance" ? "提交完工（待设施部门验收）" : selected.kind === "rectification" ? "提交整改（待巡查复查）" : "提交完成结果"}</button>` : ""}
+            ${!["draft", "approved", "in_progress"].includes(selected.status) ? `<div class="report-received"><strong>工单状态：${escapeHtml(workorderStatusLabel(selected.status, selected.kind))}</strong><span>结果已提交，等待责任岗位验收或复查</span></div>` : ""}
             ${selected.event_id ? `<button type="button" class="secondary-action" data-action="diagnose-event-copilot" data-event-id="${selected.event_id}" data-enterprise-id="${selected.enterprise_id}">用 Copilot 诊断此故障</button>` : ""}
           ` : ""}
           ${selected?.source === "incident_dispatch" && !task ? `<div class="incident-empty large">处置任务详情加载中或班组不匹配——请确认左上角班组是否为处置站</div>` : ""}
@@ -857,13 +863,13 @@ function ownerInboxTemplate() {
           ${inbox.length ? inbox.map((item) => `
             <button type="button" data-inbox-select="${item.inbox_id}" class="${item.inbox_id === selected?.inbox_id ? "active" : ""}">
               <strong>${escapeHtml(item.enterprise_name || "")}</strong>
-              <span>${escapeHtml((item.summary || "").slice(0, 40))} · ${escapeHtml(item.status)}</span>
+              <span>${escapeHtml((item.summary || "").slice(0, 40))} · ${escapeHtml(workorderStatusLabel(item.status, item.kind))}</span>
             </button>
           `).join("") : `<div class="incident-empty">暂无整改任务</div>`}
         </aside>
         <main class="station-task-detail">
           ${!selected ? `<div class="guided-empty owner-empty"><strong>整改待办是将巡查隐患派给车间责任人的整改任务</strong><p>当前没有待整改事项。可先到防火巡查创建隐患记录，返回后会在这里跟踪整改与复查。</p><button type="button" class="primary-action" data-action="go-inspections">去防火巡查新建任务</button></div>` : `
-            <div class="incident-title-row"><div><span>整改 #${selected.workorder_id}</span><h2>${escapeHtml(selected.enterprise_name)}</h2><p>网格责任人 ${escapeHtml(selected.owner || terminalOwnerName)}</p></div><strong>${escapeHtml(selected.status)}</strong></div>
+            <div class="incident-title-row"><div><span>整改 #${selected.workorder_id}</span><h2>${escapeHtml(selected.enterprise_name)}</h2><p>车间问题对接人 ${escapeHtml(selected.owner || terminalOwnerName)}</p></div><strong>${escapeHtml(workorderStatusLabel(selected.status, selected.kind))}</strong></div>
             <section class="station-brief"><div><strong>${escapeHtml(selected.summary)}</strong><small>关联隐患 #${selected.finding_id || "—"}</small></div>
             <p>整改完成后标记完成；复查通过后隐患才正式关闭。</p></section>
             ${selected.status === "approved" ? `<button type="button" class="station-action" data-action="start-inbox-workorder" data-workorder-id="${selected.workorder_id}">开始整改</button>` : ""}

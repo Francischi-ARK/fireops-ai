@@ -52,6 +52,14 @@ async function main() {
     await assertVisible(judgeTour.getByRole("heading", { name: title }));
     assert.match(page.url(), route);
     assert.equal(await page.locator("#demo-actor").inputValue(), role);
+    if (title === "车间整改与证据回传") {
+      assert.equal(await page.getByText("处理中", { exact: true }).count(), 1, "Owner inbox should show Chinese workorder status");
+      assert.equal(await page.getByText("in_progress", { exact: true }).count(), 0);
+    }
+    if (title === "设施维保审核与派发") {
+      assert.equal(await page.getByText("待审批", { exact: true }).count(), 1, "Maintenance draft should show Chinese status in list and detail");
+      assert.equal(await page.getByText("draft", { exact: true }).count(), 0);
+    }
   }
   assert.equal(await judgeTour.getByRole("button", { name: "下一步" }).isDisabled(), true);
   await judgeTour.getByRole("button", { name: "退出演示" }).click();
