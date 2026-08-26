@@ -1,0 +1,80 @@
+{
+  "schema": "fireops-semifinal/role-permissions/v1",
+  "is_simulation": true,
+  "external_system": "none",
+  "description": "复赛角色权限合同。AI 不作为独立角色出现：AI 只生成草稿与建议，任何核实、派发、操作、验收、关闭动作均由下列人类角色执行。",
+  "roles": [
+    {
+      "id": "company_management",
+      "label": "公司管理层",
+      "scope": "factory",
+      "visible_modules": ["dashboard", "monitoring", "workflow_supervision", "inspection", "reports", "archives"],
+      "allowed_actions": ["view_dashboard", "view_drilldown", "view_reports", "view_incident_report"],
+      "forbidden_actions": ["acknowledge_alarm", "confirm_fire", "dismiss_alarm", "dispatch_patrol_verify", "dispatch_brigade", "dispatch_ert", "authorize_device_operation", "approve_workorder", "dispatch_maintenance", "close_workorder", "accept_workorder_done", "close_finding_after_pass", "archive_incident"],
+      "data_visibility": "全厂汇总与合法下钻，只读"
+    },
+    {
+      "id": "control_room_operator",
+      "label": "消控室值班员",
+      "scope": "factory",
+      "visible_modules": ["dashboard", "monitoring", "alarm_verification", "workflow_supervision", "dispatch", "workorders", "inspection", "reports", "archives", "copilot"],
+      "allowed_actions": ["acknowledge_alarm", "dispatch_patrol_verify", "confirm_fire", "dismiss_alarm", "dispatch_brigade", "dispatch_ert", "recommend_route", "authorize_device_operation", "record_incident_log", "generate_incident_report", "schedule_review_meeting", "archive_incident", "escalate_fault_to_facility"],
+      "forbidden_actions": ["verify_alarm_onsite", "execute_suppression", "approve_workorder", "close_workorder", "accept_workorder_done", "close_finding_after_pass"],
+      "data_visibility": "全厂报警、事件、工单与记录；设备操作仅限经授权确认"
+    },
+    {
+      "id": "fire_patrol",
+      "label": "防火巡查人员",
+      "scope": "assigned_incident",
+      "visible_modules": ["monitoring", "my_tasks", "inspection", "reports"],
+      "allowed_actions": ["verify_alarm_onsite", "report_confirmed_fire", "report_false_alarm", "report_hazard", "submit_rectification_review", "close_finding_after_pass", "return_finding_after_fail"],
+      "forbidden_actions": ["confirm_fire", "dismiss_alarm", "dispatch_brigade", "dispatch_ert", "authorize_device_operation", "approve_workorder", "dispatch_maintenance", "close_workorder", "execute_suppression"],
+      "data_visibility": "本人任务、巡查路线与所查车间"
+    },
+    {
+      "id": "full_time_fire_brigade",
+      "label": "专职消防队",
+      "scope": "assigned_incident",
+      "visible_modules": ["my_tasks", "dispatch", "archives"],
+      "allowed_actions": ["acknowledge_dispatch", "report_enroute", "report_arrived", "report_first_status", "execute_suppression", "request_device_operation", "submit_disposition_feedback"],
+      "forbidden_actions": ["confirm_fire", "dismiss_alarm", "authorize_device_operation", "dispatch_brigade", "dispatch_ert", "close_workorder", "close_finding_after_pass", "archive_incident"],
+      "data_visibility": "分配给自己的事件、推荐路线与现场资料"
+    },
+    {
+      "id": "workshop_ert",
+      "label": "车间 ERT",
+      "scope": "assigned_incident",
+      "visible_modules": ["my_tasks"],
+      "allowed_actions": ["acknowledge_ert_task", "assist_suppression", "report_ert_status"],
+      "forbidden_actions": ["confirm_fire", "dismiss_alarm", "dispatch_brigade", "dispatch_ert", "authorize_device_operation", "execute_suppression", "close_workorder", "close_finding_after_pass"],
+      "data_visibility": "本车间及分配给自己的应急任务"
+    },
+    {
+      "id": "facility_department",
+      "label": "消防设施部门",
+      "scope": "factory",
+      "visible_modules": ["dashboard", "monitoring", "workorders", "reports", "archives"],
+      "allowed_actions": ["review_fault", "approve_workorder", "dispatch_maintenance", "accept_workorder_done", "reject_workorder", "close_workorder"],
+      "forbidden_actions": ["confirm_fire", "dismiss_alarm", "dispatch_brigade", "authorize_device_operation", "execute_suppression", "start_workorder", "submit_maintenance_evidence"],
+      "data_visibility": "全厂故障与维保工单、设备台账"
+    },
+    {
+      "id": "maintenance_contractor",
+      "label": "消防维保单位",
+      "scope": "assigned_workorder",
+      "visible_modules": ["my_tasks", "workorders"],
+      "allowed_actions": ["start_workorder", "submit_maintenance_evidence", "submit_workorder_for_acceptance"],
+      "forbidden_actions": ["approve_workorder", "dispatch_maintenance", "accept_workorder_done", "close_workorder", "confirm_fire", "dismiss_alarm", "authorize_device_operation"],
+      "data_visibility": "仅分配给自己的工单"
+    },
+    {
+      "id": "workshop_liaison",
+      "label": "车间问题对接人",
+      "scope": "assigned_workshop",
+      "visible_modules": ["my_tasks", "inspection"],
+      "allowed_actions": ["acknowledge_finding", "assign_rectification", "submit_rectification_evidence"],
+      "forbidden_actions": ["close_finding_after_pass", "return_finding_after_fail", "submit_rectification_review", "confirm_fire", "dismiss_alarm", "approve_workorder", "close_workorder"],
+      "data_visibility": "仅本车间隐患与整改工单"
+    }
+  ]
+}
