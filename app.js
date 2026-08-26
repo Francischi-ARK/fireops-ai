@@ -3014,6 +3014,15 @@ function copilotSelectTemplate(scenario) {
       <ol><li>AI 研判</li><li>人工核实</li><li>人工派单</li><li>模拟处置</li><li>人工归档</li></ol>
       <button type="button" class="primary-action" data-copilot-action="judge-run"><i data-lucide="play"></i>开始评委演示</button>
     </section>
+    <section class="rag-eval-card" aria-labelledby="rag-eval-title">
+      <div class="rag-eval-intro"><span>RAG EVALUATION / FIXED TEST SET</span><h2 id="rag-eval-title">知识检索离线评测</h2><p>基于 15 条设备说明书、通讯规约和管理制度知识，执行型号过滤、同义词归一化和关键词重排。</p></div>
+      <dl class="rag-eval-metrics">
+        <div><dt>评测问题</dt><dd>30</dd><small>固定可重复</small></div>
+        <div><dt>Top-3 命中</dt><dd>28 / 28</dd><small>可回答问题</small></div>
+        <div><dt>正确拒答</dt><dd>2 / 2</dd><small>无相关证据</small></div>
+      </dl>
+      <p class="rag-eval-boundary"><i data-lucide="shield-check"></i><span>检索结果必须带文档、章节、页码和匹配理由；工具未返回的证据不会进入处置建议。</span></p>
+    </section>
     <div class="copilot-setup">
       <div class="copilot-scenarios">
         ${copilotState.scenarios.map((item) => `

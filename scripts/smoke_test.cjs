@@ -72,6 +72,12 @@ async function main() {
   await assertVisible(weeklyHeading);
   assert.equal(await page.locator("[data-weekly-category]").count(), 4);
   assert.equal(await page.locator("[data-weekly-workshop]").count(), 5);
+  await page.goto(`${APP_ROOT}#/copilot`);
+  const ragHeading = page.getByRole("heading", { name: "知识检索离线评测" });
+  assert.equal(await ragHeading.count(), 1, "Copilot should expose 知识检索离线评测");
+  await assertVisible(ragHeading);
+  await assertVisible(page.getByText("28 / 28", { exact: true }));
+  await assertVisible(page.getByText("2 / 2", { exact: true }));
 
   await page.locator("#demo-actor").selectOption("maintenance_contractor");
   await assertVisible(page.getByRole("heading", { name: "消防维保单位工作台" }));

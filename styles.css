@@ -978,6 +978,10 @@ main { min-height: calc(100vh - 54px); }
 .judge-demo-entry h2 { margin: 5px 0 6px; font-size: 24px; }.judge-demo-entry p { max-width: 720px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .judge-demo-entry ol { display: flex; grid-column: 1 / -1; gap: 0; margin: 0; padding: 0; list-style: none; }
 .judge-demo-entry li { flex: 1; padding: 9px 10px; border: 1px solid var(--line); border-right: 0; color: var(--muted); font-size: 11px; }.judge-demo-entry li:last-child { border-right: 1px solid var(--line); }
+.rag-eval-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(420px, .9fr); gap: 16px 28px; margin-bottom: 18px; padding: 20px 22px; border: 1px solid var(--line); background: #fff; }
+.rag-eval-intro span { color: var(--violet); font-size: 10px; font-weight: 850; letter-spacing: .12em; }.rag-eval-intro h2 { margin: 5px 0 6px; font-size: 18px; }.rag-eval-intro p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.rag-eval-metrics { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; border: 1px solid var(--line); }.rag-eval-metrics div { padding: 11px 12px; }.rag-eval-metrics div + div { border-left: 1px solid var(--line); }.rag-eval-metrics dt, .rag-eval-metrics small { color: var(--muted); font-size: 10px; }.rag-eval-metrics dd { margin: 4px 0 2px; color: var(--ink); font-size: 20px; font-weight: 800; }
+.rag-eval-boundary { display: flex; grid-column: 1 / -1; gap: 8px; align-items: center; margin: 0; padding-top: 12px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }.rag-eval-boundary svg { flex: none; width: 15px; color: var(--green); }
 .judge-gate { display: grid; gap: 3px; margin-bottom: 14px; padding: 10px 12px; border-left: 3px solid var(--red); background: var(--red-soft); }.judge-gate b { color: var(--red); font-size: 11px; }.judge-gate span { color: var(--muted); font-size: 11px; }
 .judge-simulation ol { display: grid; gap: 7px; margin: 14px 0 0; padding: 0; list-style: none; }.judge-simulation li { padding: 10px 12px; border: 1px solid var(--line); color: var(--muted); }.judge-simulation li.done { color: var(--ink); border-color: var(--green); background: var(--green-soft); }
 .offline-demo-complete > span { color: var(--green); font-size: 10px; font-weight: 850; letter-spacing: .14em; }.offline-demo-complete ol { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; padding: 0; list-style: none; }.offline-demo-complete li { padding: 7px 9px; border: 1px solid #b9d4c7; color: #16724a; background: #f4fbf7; font-size: 11px; }
@@ -1041,6 +1045,7 @@ main { min-height: calc(100vh - 54px); }
   .copilot-header { align-items: flex-start; }
   .copilot-header h1 { font-size: 22px; }
   .judge-demo-entry { grid-template-columns: 1fr; }.judge-demo-entry ol { display: grid; grid-template-columns: 1fr 1fr; }.judge-demo-entry li { border-right: 1px solid var(--line); }.judge-demo-entry .primary-action { width: 100%; }
+  .rag-eval-card { grid-template-columns: 1fr; padding: 16px; }.rag-eval-metrics { grid-template-columns: 1fr; }.rag-eval-metrics div + div { border-top: 1px solid var(--line); border-left: 0; }.rag-eval-boundary { grid-column: auto; }
   .copilot-scenario { min-height: 80px; }
   .copilot-mode button, .copilot-run-button, .copilot-actions > * { min-height: 48px; }
   .copilot-context { display: grid; grid-template-columns: 1fr; align-items: flex-start; }
