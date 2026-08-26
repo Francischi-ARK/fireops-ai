@@ -1421,7 +1421,7 @@ function workbenchTemplate() {
             <div class="company-title-line"><h1 id="company-title">${company.name}</h1>${riskBadge(company)}</div>
             <p>${company.building}<span>建筑面积 ${company.area}</span><span>地上 1 层</span><span>投用时间 2023-05</span></p>
           </div>
-          <label class="building-select">切换建筑/区域<select><option>${company.building}</option><option>原料仓库</option><option>消防泵房</option></select></label>
+          <div class="building-context"><span><small>空间位置</small><strong>厂区总览 <i>/</i> ${escapeHtml(company.building)}</strong></span><button type="button" data-action="open-factory-overview"><i data-lucide="map"></i>返回厂区总览</button></div>
         </header>
 
         <section class="plan-panel" aria-labelledby="plan-title">
@@ -2355,6 +2355,11 @@ function handleAction(action, issueId) {
   }
   if (action === "company-detail") {
     location.hash = `#/enterprises/${selectedCompanyId}`;
+    return;
+  }
+  if (action === "open-factory-overview") {
+    monitoringState.spatialLevel = "factory";
+    location.hash = "#/monitoring";
     return;
   }
   if (action === "route-history") return showToast("当前演示保留 2026-07-29 路线，历史记录未导入");

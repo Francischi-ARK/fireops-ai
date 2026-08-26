@@ -517,8 +517,10 @@ main { min-height: calc(100vh - 54px); }
 .company-title-line h1 { margin: 0; font-size: 23px; letter-spacing: -0.03em; }
 .company-context p { display: flex; flex-wrap: wrap; gap: 0; margin: 9px 0 0; color: var(--muted); font-size: 11px; }
 .company-context p span { margin-left: 13px; padding-left: 13px; border-left: 1px solid var(--line); }
-.building-select { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; white-space: nowrap; }
-.building-select select, .panel-filters select { min-height: 36px; padding: 6px 28px 6px 9px; border: 1px solid var(--line-strong); border-radius: 3px; background: #fff; font-size: 11px; }
+.building-context { display: flex; gap: 12px; align-items: center; }
+.building-context > span { display: grid; gap: 4px; text-align: right; }.building-context small { color: var(--muted); font-size: 9px; letter-spacing: .08em; }.building-context strong { color: var(--ink); font-size: 11px; }.building-context strong i { padding: 0 4px; color: var(--line-strong); font-style: normal; }
+.building-context button { display: inline-flex; min-height: 36px; align-items: center; gap: 6px; padding: 6px 10px; color: var(--ink); background: #fff; border: 1px solid var(--line-strong); border-radius: 3px; cursor: pointer; font-size: 10px; font-weight: 700; }.building-context button:hover { border-color: var(--violet); }.building-context button svg { width: 14px; }
+.panel-filters select { min-height: 36px; padding: 6px 28px 6px 9px; border: 1px solid var(--line-strong); border-radius: 3px; background: #fff; font-size: 11px; }
 
 .plan-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .plan-toolbar { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; border-bottom: 1px solid var(--line); }
@@ -780,7 +782,7 @@ main { min-height: calc(100vh - 54px); }
   .company-rail > .secondary-action, .rail-note { display: none; }
   .plan-workspace { padding: 14px 11px; }
   .company-context { display: block; }
-  .building-select { margin-top: 10px; }
+  .building-context { justify-content: space-between; margin-top: 12px; }.building-context > span { text-align: left; }
   .plan-toolbar { align-items: flex-start; flex-direction: column; }
   .plan-legend { justify-content: flex-start; }
   .plan-viewport { max-height: 460px; }

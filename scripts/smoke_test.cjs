@@ -115,6 +115,15 @@ async function main() {
   await assertVisible(page.getByRole("heading", { name: "防火巡查与隐患闭环" }));
   assert.equal(await page.locator(".system-strip").count(), 0);
   await assertVisible(page.getByRole("heading", { name: "电池车间（PACK/化成）" }));
+  const buildingContext = page.locator(".building-context");
+  assert.equal(await buildingContext.count(), 1, "Inspection header should expose real spatial breadcrumb");
+  assert.match(await buildingContext.innerText(), /厂区总览.*电池车间厂房/s);
+  assert.equal(await buildingContext.locator("select").count(), 0, "fake building choices must be removed");
+  assert.equal(/原料仓库|消防泵房/.test(await buildingContext.innerText()), false);
+  await buildingContext.getByRole("button", { name: "返回厂区总览" }).click();
+  assert.match(page.url(), /#\/monitoring$/);
+  await page.locator('#monitoring-3d[data-spatial-level="factory"]').waitFor();
+  await page.goto(INSPECTION_URL);
   assert.equal(await page.locator("[data-company-id]").count(), 5);
   await assertVisible(page.locator(".plan-canvas img"));
   assert.equal(await page.locator(".map-pin").count(), 3);
