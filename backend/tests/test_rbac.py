@@ -82,6 +82,19 @@ class RbacApiTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(self.repository.calls[-1], ("close", "消控室值班员（演示）"))
 
+    def test_company_management_is_read_only(self):
+        requests = [
+            ("/signals/1/verification", {"result": "dismissed"}),
+            ("/dispatches/1/transition", {"action": "acknowledge"}),
+            ("/incidents/1/close", {}),
+        ]
+        for path, body in requests:
+            with self.subTest(path=path):
+                response = self.post(path, "ehs-demo", body)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["detail"], "role_not_allowed")
+        self.assertEqual(self.repository.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

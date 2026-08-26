@@ -21,10 +21,34 @@ async function main() {
   try {
   await page.goto(APP_URL);
   await page.waitForLoadState("domcontentloaded");
-  await assertVisible(page.getByRole("heading", { name: "选择工作台" }));
-  assert.equal(await page.locator("[data-workspace-link]").count(), 6);
+  await assertVisible(page.getByRole("heading", { name: "消控室值班员工作台" }));
+  assert.equal(await page.locator(".role-scope-notice").count(), 0, "hidden dialog controls must not produce a page-level permission warning");
+  assert.deepEqual(await page.locator(".primary-nav a:not([hidden])").allTextContents(), ["首页", "应急处置", "日常防控", "分析复盘", "资产与空间"]);
+  assert.equal(await page.locator("[data-workspace-link]").count(), 4);
   await page.screenshot({ path: path.join(__dirname, "../workspaces-1440x1024.png") });
-  await page.getByRole("link", { name: /防火巡查与隐患闭环/ }).click();
+
+  await page.locator("#demo-actor").selectOption("maintenance_contractor");
+  await assertVisible(page.getByRole("heading", { name: "消防维保单位工作台" }));
+  assert.deepEqual(await page.locator(".primary-nav a:not([hidden])").allTextContents(), ["首页", "设施运维"]);
+  await page.goto(`${APP_ROOT}#/incidents`);
+  await assertVisible(page.getByRole("heading", { name: "当前角色无权进入此模块" }));
+
+  await page.goto(APP_URL);
+  await page.locator("#demo-actor").selectOption("company_management");
+  await assertVisible(page.getByRole("heading", { name: "全厂消防态势" }));
+  assert.equal(await page.locator("[data-management-kpi]").count(), 4);
+  assert.equal(await page.locator("[data-workshop-risk-row]").count(), 5);
+  assert.deepEqual(await page.locator(".primary-nav a:not([hidden])").allTextContents(), ["首页", "应急处置", "日常防控", "设施运维", "分析复盘", "资产与空间"]);
+  await page.goto(`${APP_ROOT}#/analysis/ent-001`);
+  await assertVisible(page.locator(".role-scope-notice"));
+  assert.equal(await page.getByRole("button", { name: "保存修订" }).isDisabled(), true);
+  assert.equal(await page.getByRole("button", { name: "确认报告" }).isDisabled(), true);
+  await page.goto(APP_URL);
+  await page.locator("#demo-actor").selectOption("full_time_fire_brigade");
+  assert.deepEqual(await page.locator(".primary-nav a:not([hidden])").allTextContents(), ["首页", "应急处置", "资产与空间"]);
+  await page.locator("#demo-actor").selectOption("fire_patrol");
+  await page.goto(APP_URL);
+  await page.locator(".workspace-card", { hasText: "日常防控" }).click();
   assert.match(page.url(), /#\/inspections$/);
   await assertVisible(page.getByRole("heading", { name: "防火巡查与隐患闭环" }));
   assert.equal(await page.locator(".system-strip").count(), 0);
@@ -69,6 +93,7 @@ async function main() {
   await assertVisible(page.getByText("演示隐患无后端记录，已本地标记复查发起"));
   await workflowDialog.locator("button.dialog-secondary").click();
 
+  await page.locator("#demo-actor").selectOption("control_room_operator");
   await page.getByRole("link", { name: "AI 分析报告" }).click();
   assert.match(page.url(), /#\/analysis/);
   const editor = page.locator("#report-editor");

@@ -1,7 +1,18 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack } = require("../engine.cjs");
+const {
+  parseCsv,
+  validateBundle,
+  scoreBundle,
+  incidentStatusLabel,
+  stationStatusLabel,
+  nextStationAction,
+  buildFirstResponsePack,
+  roleDefinitions,
+  canRolePerform,
+  transitionWorkflow,
+} = require("../engine.cjs");
 
 const mode = process.argv[2] || "all";
 
@@ -80,8 +91,68 @@ function testFirstResponsePack() {
   assert.ok(pack.boundaries.includes("对外共享与报警由授权人员确认"));
 }
 
+function testRoleWorkflows() {
+  const roles = roleDefinitions();
+  assert.equal(roles.length, 8, "the enterprise workflow must expose eight fixed roles");
+  assert.equal(new Set(roles.map((role) => role.id)).size, 8, "role IDs must be unique");
+  assert.deepEqual(
+    roles.find((role) => role.id === "company_management").modules,
+    ["home", "emergency", "prevention", "operations", "analysis", "assets"],
+    "management must see the whole factory fire-safety picture",
+  );
+  assert.equal(canRolePerform("company_management", "dispatch_response"), false, "management is read-only for dispatch");
+  assert.equal(canRolePerform("maintenance_contractor", "accept_maintenance"), false, "contractors cannot accept their own maintenance");
+  assert.equal(canRolePerform("workshop_liaison", "pass_recheck"), false, "workshop liaisons cannot close their own findings");
+  assert.equal(canRolePerform("control_room_operator", "dispatch_response"), true);
+
+  assert.deepEqual(
+    transitionWorkflow("alarm_response", "signal_pending", "dispatch_verification", "control_room_operator"),
+    { allowed: true, changed: true, state: "verification_dispatched" },
+  );
+  assert.deepEqual(
+    transitionWorkflow("alarm_response", "verification_enroute", "confirm_fire", "fire_patrol"),
+    { allowed: true, changed: true, state: "fire_confirmed" },
+  );
+  assert.equal(
+    transitionWorkflow("alarm_response", "fire_confirmed", "dispatch_response", "company_management").code,
+    "forbidden_role",
+  );
+
+  assert.deepEqual(
+    transitionWorkflow("maintenance", "in_progress", "submit_maintenance_result", "maintenance_contractor"),
+    { allowed: true, changed: true, state: "acceptance_pending" },
+  );
+  assert.equal(
+    transitionWorkflow("maintenance", "acceptance_pending", "accept_maintenance", "maintenance_contractor").code,
+    "forbidden_role",
+  );
+  assert.deepEqual(
+    transitionWorkflow("maintenance", "acceptance_pending", "accept_maintenance", "facility_department"),
+    { allowed: true, changed: true, state: "closed" },
+  );
+  assert.deepEqual(
+    transitionWorkflow("maintenance", "closed", "accept_maintenance", "facility_department"),
+    { allowed: true, changed: false, state: "closed" },
+    "repeated terminal actions must be idempotent",
+  );
+
+  assert.deepEqual(
+    transitionWorkflow("inspection_rectification", "rectifying", "submit_rectification", "workshop_liaison"),
+    { allowed: true, changed: true, state: "recheck_pending" },
+  );
+  assert.equal(
+    transitionWorkflow("inspection_rectification", "recheck_pending", "pass_recheck", "workshop_liaison").code,
+    "forbidden_role",
+  );
+  assert.deepEqual(
+    transitionWorkflow("inspection_rectification", "recheck_pending", "fail_recheck", "fire_patrol"),
+    { allowed: true, changed: true, state: "assigned" },
+  );
+}
+
 if (mode === "parser" || mode === "all") testParser();
 if (mode === "scoring" || mode === "all") testScoring();
 if (mode === "incident" || mode === "all") testIncidentUi();
 if (mode === "response-pack" || mode === "all") testFirstResponsePack();
+if (mode === "roles" || mode === "all") testRoleWorkflows();
 console.log(`engine tests (${mode}): ok`);

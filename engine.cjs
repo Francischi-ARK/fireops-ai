@@ -207,6 +207,72 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+const ROLE_DEFINITIONS = [
+  { id: "company_management", label: "公司管理层", scope: "factory", modules: ["home", "emergency", "prevention", "operations", "analysis", "assets"], actions: ["view_factory_summary", "view_evidence", "view_reports"] },
+  { id: "control_room_operator", label: "消控室值班员", scope: "factory", modules: ["home", "emergency", "prevention", "analysis", "assets"], actions: ["receive_alarm", "dispatch_verification", "dispatch_response", "confirm_device_operation", "end_incident", "confirm_report", "archive_incident"] },
+  { id: "fire_patrol", label: "防火巡查人员", scope: "factory", modules: ["home", "emergency", "prevention", "assets"], actions: ["acknowledge_verification", "confirm_false_alarm", "confirm_fire", "start_inspection", "report_finding", "assign_rectification", "pass_recheck", "fail_recheck"] },
+  { id: "full_time_fire_brigade", label: "专职消防队", scope: "assigned_incident", modules: ["home", "emergency", "assets"], actions: ["acknowledge_dispatch", "depart", "arrive", "begin_response", "submit_field_report", "confirm_fire_controlled"] },
+  { id: "workshop_ert", label: "车间 ERT", scope: "assigned_incident", modules: ["home", "emergency", "assets"], actions: ["acknowledge_dispatch", "depart", "arrive", "submit_field_report"] },
+  { id: "facility_department", label: "消防设施部门", scope: "factory", modules: ["home", "operations", "analysis", "assets"], actions: ["dispatch_maintenance", "accept_maintenance", "view_device_ledger"] },
+  { id: "maintenance_contractor", label: "消防维保单位", scope: "assigned_workorder", modules: ["home", "operations"], actions: ["acknowledge_maintenance", "start_maintenance", "submit_maintenance_result"] },
+  { id: "workshop_liaison", label: "车间问题对接人", scope: "assigned_workshop", modules: ["home", "prevention"], actions: ["acknowledge_rectification", "start_rectification", "submit_rectification"] },
+];
+
+const WORKFLOW_TRANSITIONS = {
+  alarm_response: [
+    ["signal_pending", "dispatch_verification", "verification_dispatched", ["control_room_operator"]],
+    ["verification_dispatched", "acknowledge_verification", "verification_enroute", ["fire_patrol"]],
+    ["verification_enroute", "confirm_false_alarm", "dismissed_fault", ["fire_patrol"]],
+    ["verification_enroute", "confirm_fire", "fire_confirmed", ["fire_patrol"]],
+    ["fire_confirmed", "dispatch_response", "response_dispatched", ["control_room_operator"]],
+    ["response_dispatched", "begin_response", "response_active", ["full_time_fire_brigade"]],
+    ["response_active", "confirm_fire_controlled", "fire_controlled", ["full_time_fire_brigade"]],
+    ["fire_controlled", "end_incident", "report_pending", ["control_room_operator"]],
+    ["report_pending", "confirm_report", "review_pending", ["control_room_operator"]],
+    ["review_pending", "archive_incident", "archived", ["control_room_operator"]],
+  ],
+  maintenance: [
+    ["fault_reported", "dispatch_maintenance", "assigned", ["facility_department"]],
+    ["assigned", "acknowledge_maintenance", "acknowledged", ["maintenance_contractor"]],
+    ["acknowledged", "start_maintenance", "in_progress", ["maintenance_contractor"]],
+    ["in_progress", "submit_maintenance_result", "acceptance_pending", ["maintenance_contractor"]],
+    ["acceptance_pending", "accept_maintenance", "closed", ["facility_department"]],
+  ],
+  inspection_rectification: [
+    ["scheduled", "start_inspection", "in_progress", ["fire_patrol"]],
+    ["in_progress", "report_finding", "finding_draft", ["fire_patrol"]],
+    ["finding_draft", "assign_rectification", "assigned", ["fire_patrol"]],
+    ["assigned", "start_rectification", "rectifying", ["workshop_liaison"]],
+    ["rectifying", "submit_rectification", "recheck_pending", ["workshop_liaison"]],
+    ["recheck_pending", "pass_recheck", "closed", ["fire_patrol"]],
+    ["recheck_pending", "fail_recheck", "assigned", ["fire_patrol"]],
+  ],
+};
+
+function roleDefinitions() {
+  return ROLE_DEFINITIONS.map((role) => ({ ...role, modules: [...role.modules], actions: [...role.actions] }));
+}
+
+function canRolePerform(roleId, action) {
+  return Boolean(ROLE_DEFINITIONS.find((role) => role.id === roleId)?.actions.includes(action));
+}
+
+function transitionWorkflow(workflow, state, action, roleId) {
+  const role = ROLE_DEFINITIONS.find((item) => item.id === roleId);
+  if (!role) return { allowed: false, changed: false, state, code: "unknown_role" };
+  if (!role.actions.includes(action)) return { allowed: false, changed: false, state, code: "forbidden_role" };
+  const transitions = WORKFLOW_TRANSITIONS[workflow];
+  if (!transitions) return { allowed: false, changed: false, state, code: "unknown_workflow" };
+  const transition = transitions.find(([from, transitionAction]) => from === state && transitionAction === action);
+  if (transition) {
+    if (!transition[3].includes(roleId)) return { allowed: false, changed: false, state, code: "forbidden_role" };
+    return { allowed: true, changed: true, state: transition[2] };
+  }
+  const completed = transitions.find(([, transitionAction, target, roles]) => transitionAction === action && target === state && roles.includes(roleId));
+  if (completed) return { allowed: true, changed: false, state };
+  return { allowed: false, changed: false, state, code: "invalid_transition" };
+}
+
 function incidentStatusLabel(status) {
   return {
     pending_dispatch: "待调派", dispatched: "已下达", acknowledged: "已签收",
@@ -311,6 +377,6 @@ function createMonitoringEvent(events, type, enterpriseId, now = new Date()) {
   return [event, ...events];
 }
 
-const api = { parseCsv, validateBundle, scoreBundle, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack, monitoringEvents, filterMonitoringEvents, createMonitoringEvent, RULESET };
+const api = { parseCsv, validateBundle, scoreBundle, roleDefinitions, canRolePerform, transitionWorkflow, incidentStatusLabel, stationStatusLabel, nextStationAction, buildFirstResponsePack, monitoringEvents, filterMonitoringEvents, createMonitoringEvent, RULESET };
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 if (typeof window !== "undefined") window.FireGuardEngine = api;

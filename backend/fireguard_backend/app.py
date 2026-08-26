@@ -33,7 +33,7 @@ DEMO_ACTORS = {
     "crew-demo": {"id": "crew-demo", "role": "crew", "label": "处置/维保班组（演示）"},
     "owner-demo": {"id": "owner-demo", "role": "owner", "label": "网格责任人（演示）"},
     "inspector-demo": {"id": "inspector-demo", "role": "inspector", "label": "防火巡查员（演示）"},
-    "ehs-demo": {"id": "ehs-demo", "role": "ehs", "label": "EHS 经理（演示）"},
+    "ehs-demo": {"id": "ehs-demo", "role": "management", "label": "公司管理层（演示）"},
 }
 
 

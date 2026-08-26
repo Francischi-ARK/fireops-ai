@@ -99,12 +99,11 @@ const equipment = [
 ];
 
 const workspaces = [
-  { route: "monitoring", role: "消控室 / EHS", icon: "scan-line", title: "工厂消防态势监测", description: "汇聚火警主机 Modbus 事件、点位状态、维保与隐患闭环。", status: "3D Demo" },
-  { route: "incidents", role: "消控室值班员", icon: "radio-tower", title: "报警核实与工单派发台", description: "处理合成报警的核实、诊断、工单派发与跟踪反馈。", status: "可演示" },
-  { route: "station", role: "处置班组 / 维保组", icon: "siren", title: "班组工单终端", description: "接收处置与维修工单，反馈签收、到场和处理结果。", status: "可演示" },
-  { route: "owner", role: "车间责任人", icon: "user-round-check", title: "整改待办", description: "接收防火巡查发现的隐患，完成整改后交回巡查员复查。", status: "可演示" },
-  { route: "inspections", role: "防火巡查员", icon: "clipboard-check", title: "防火巡查与隐患闭环", description: "拍照识别隐患、语音辅助录入，人工确认后派发网格责任人整改。", status: "可演示" },
-  { route: "enterprises/ent-001", role: "EHS 经理", icon: "factory", title: "车间消防档案", description: "查看本车间风险画像、设备台账与未闭环隐患，并跳转到核实/巡查/班组继续处理。", status: "可演示" },
+  { module: "emergency", route: "incidents", role: "接警、核实、调度与现场处置", icon: "siren", title: "应急处置", description: "从设备报警到巡查核实、消防队与 ERT 出动、现场反馈和事件归档。", status: "火警闭环" },
+  { module: "prevention", route: "inspections", role: "巡查、整改与复查", icon: "clipboard-check", title: "日常防控", description: "执行巡查计划，上报隐患并跟踪车间整改和复查关闭。", status: "巡查闭环" },
+  { module: "operations", route: "station?crew_id=crew-wb-01", role: "故障、维保与验收", icon: "wrench", title: "设施运维", description: "处理设备故障、维保派单、维修反馈和设施部门验收。", status: "维保闭环" },
+  { module: "analysis", route: "analysis/ent-001", role: "管理分析与事件复盘", icon: "chart-no-axes-combined", title: "分析复盘", description: "查看车间风险、问题分布、整改效率和有证据的改进建议。", status: "管理视图" },
+  { module: "assets", route: "monitoring", role: "厂区、车间、楼层与点位", icon: "map", title: "资产与空间", description: "从厂区总览进入车间、楼层、通道、消防设施和报警点位。", status: "空间底座" },
 ];
 const OWNER_OPTIONS = ["张伟", "李强", "王磊", "赵敏", "陈刚", "周倩", "孙磊"];
 
@@ -174,7 +173,53 @@ const OFFLINE_JUDGE_SCENARIO = {
   },
   safe_failure: "Agent 只整理证据和起草处置建议；核实、派单与归档均由人确认。",
 };
-let demoActorId = localStorage.getItem("fireops-demo-actor") || "duty-demo";
+const ROLE_ACTOR_IDS = {
+  company_management: "ehs-demo",
+  control_room_operator: "duty-demo",
+  fire_patrol: "inspector-demo",
+  full_time_fire_brigade: "crew-demo",
+  workshop_ert: "crew-demo",
+  facility_department: "duty-demo",
+  maintenance_contractor: "crew-demo",
+  workshop_liaison: "owner-demo",
+};
+const ACTOR_ROLE_IDS = {
+  "ehs-demo": "company_management",
+  "duty-demo": "control_room_operator",
+  "inspector-demo": "fire_patrol",
+  "crew-demo": "full_time_fire_brigade",
+  "owner-demo": "workshop_liaison",
+};
+const ROUTE_MODULES = {
+  home: "home", incidents: "emergency", workflow: "emergency", copilot: "emergency",
+  inspections: "prevention", owner: "prevention",
+  analysis: "analysis", monitoring: "assets", enterprises: "assets",
+};
+const ROLE_SCOPE_LABELS = { factory: "全厂", assigned_workshop: "本车间", assigned_workorder: "已分配工单", assigned_incident: "已分配事件" };
+const UI_ACTION_ROLES = {
+  "inject-demo-event": ["control_room_operator"],
+  "inject-demo-fault": ["control_room_operator"],
+  "verify-signal": ["control_room_operator"],
+  "dismiss-monitoring-event": ["control_room_operator"],
+  "confirm-device-signal": ["control_room_operator"],
+  "dismiss-device-signal": ["control_room_operator"],
+  "dispatch-incident": ["control_room_operator"],
+  "close-incident": ["control_room_operator"],
+  "approve-inbox-workorder": ["facility_department"],
+  "station-next-action": ["full_time_fire_brigade", "maintenance_contractor"],
+  "submit-first-report": ["full_time_fire_brigade"],
+  "start-inbox-workorder": ["maintenance_contractor", "workshop_liaison"],
+  "complete-inbox-workorder": ["maintenance_contractor", "workshop_liaison"],
+  "open-inspect-capture": ["fire_patrol"],
+  reinspect: ["fire_patrol"],
+  "scan-maintenance": ["facility_department"],
+  "save-report": ["control_room_operator"],
+  regenerate: ["control_room_operator"],
+  "confirm-report": ["control_room_operator"],
+};
+let activeRoleId = localStorage.getItem("fireops-active-role") || ACTOR_ROLE_IDS[localStorage.getItem("fireops-demo-actor")] || "control_room_operator";
+if (!ROLE_ACTOR_IDS[activeRoleId]) activeRoleId = "control_room_operator";
+let demoActorId = ROLE_ACTOR_IDS[activeRoleId];
 const actorHeaders = () => ({ "Content-Type": "application/json", "X-FireOps-Actor": demoActorId });
 const DEMO_INSPECT_ASSETS = [
   "assets/evidence-extinguisher-blocked.png",
@@ -267,11 +312,76 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 2300);
 }
 
-function setDemoActor(actorId) {
-  demoActorId = actorId;
-  localStorage.setItem("fireops-demo-actor", actorId);
+function activeRoleDefinition() {
+  return window.FireGuardEngine.roleDefinitions().find((role) => role.id === activeRoleId)
+    || window.FireGuardEngine.roleDefinitions().find((role) => role.id === "control_room_operator");
+}
+
+function setActiveRole(roleId) {
+  if (!ROLE_ACTOR_IDS[roleId]) return;
+  activeRoleId = roleId;
+  demoActorId = ROLE_ACTOR_IDS[roleId];
+  localStorage.setItem("fireops-active-role", roleId);
+  localStorage.setItem("fireops-demo-actor", demoActorId);
   const actorSelect = document.querySelector("#demo-actor");
-  if (actorSelect) actorSelect.value = actorId;
+  if (actorSelect) actorSelect.value = roleId;
+}
+
+function setDemoActor(actorId) {
+  setActiveRole(ROLE_ACTOR_IDS[actorId] ? actorId : ACTOR_ROLE_IDS[actorId] || activeRoleId);
+}
+
+function routeModule(root) {
+  if (root === "station" && ["full_time_fire_brigade", "workshop_ert"].includes(activeRoleId)) return "emergency";
+  if (root === "station") return "operations";
+  return ROUTE_MODULES[root] || "home";
+}
+
+function updateRoleNavigation(root) {
+  const role = activeRoleDefinition();
+  const visibleModules = new Set(role.modules);
+  document.querySelectorAll("[data-module]").forEach((item) => {
+    item.hidden = !visibleModules.has(item.dataset.module);
+  });
+  const activeModule = routeModule(root);
+  document.querySelectorAll("[data-top-nav]").forEach((item) => item.classList.toggle("active", item.dataset.topNav === activeModule));
+  document.querySelectorAll("[data-mobile-nav]").forEach((item) => item.classList.toggle("active", item.dataset.mobileNav === activeModule));
+}
+
+function applyRoleActionPermissions() {
+  document.querySelectorAll("[data-role-disabled='true']").forEach((element) => {
+    element.disabled = false;
+    element.removeAttribute("aria-disabled");
+    element.removeAttribute("title");
+    delete element.dataset.roleDisabled;
+  });
+  let restricted = 0;
+  app.querySelectorAll("[data-action]").forEach((element) => {
+    const roles = UI_ACTION_ROLES[element.dataset.action];
+    if (!roles || roles.includes(activeRoleId)) return;
+    element.disabled = true;
+    element.dataset.roleDisabled = "true";
+    element.setAttribute("aria-disabled", "true");
+    element.title = `当前角色不可执行；责任岗位：${roles.map((id) => window.FireGuardEngine.roleDefinitions().find((role) => role.id === id)?.label || id).join("、")}`;
+    restricted += 1;
+  });
+  app.querySelectorAll("[data-copilot-verify], [data-copilot-action='run'], [data-copilot-action='judge-run'], [data-copilot-action='dispatch'], [data-copilot-action='offline-archive']").forEach((element) => {
+    if (activeRoleId === "control_room_operator") return;
+    element.disabled = true;
+    element.dataset.roleDisabled = "true";
+    element.setAttribute("aria-disabled", "true");
+    element.title = "处置研判和人工闸门由消控室值班员执行";
+    restricted += 1;
+  });
+  [document.querySelector("#inspect-dispatch-btn"), document.querySelector("#start-reinspection")].filter(Boolean).forEach((element) => {
+    if (activeRoleId === "fire_patrol") return;
+    element.disabled = true;
+    element.dataset.roleDisabled = "true";
+    element.setAttribute("aria-disabled", "true");
+    element.title = "隐患派发和复查由防火巡查人员执行";
+  });
+  if (!restricted || app.querySelector(".role-scope-notice")) return;
+  app.firstElementChild?.insertAdjacentHTML("afterbegin", `<div class="role-scope-notice" role="status"><i data-lucide="eye"></i><span><strong>${escapeHtml(activeRoleDefinition().label)}查看模式</strong>本页有 ${restricted} 个操作属于其他岗位，已按权限禁用。</span></div>`);
 }
 
 function routeHash(root, context = {}) {
@@ -740,25 +850,65 @@ function ownerInboxTemplate() {
     </section>`;
 }
 
+function managementHomeTemplate() {
+  const activeEvents = monitoringState.events.filter((event) => event.status !== "closed");
+  const pendingFire = activeEvents.filter((event) => event.type === "fire" && event.status === "pending").length;
+  const openHazards = companies.reduce((sum, company) => sum + company.openHazards, 0);
+  const abnormalEquipment = equipment.filter((item) => item.state !== "正常").length;
+  const finishedInspection = inspectionRoute.filter((item) => item.status === "已闭环").length;
+  const rankedCompanies = [...companies].sort((left, right) => (left.score ?? -1) - (right.score ?? -1));
+  return `
+    <section class="management-dashboard" aria-labelledby="management-title">
+      <header class="management-header">
+        <div><span>COMPANY FIRE SAFETY / SYNTHETIC DATA</span><h1 id="management-title">全厂消防态势</h1><p>管理层只读视角：汇总火警、巡查、设备维保和整改情况，具体处置由对应岗位完成。</p></div>
+        <a class="secondary-action" href="#/monitoring"><i data-lucide="map"></i>查看厂区空间</a>
+      </header>
+      <dl class="management-kpis">
+        <div data-management-kpi><dt>待核实火警</dt><dd class="status-red">${pendingFire}</dd><small>${pendingFire ? "需要消控室派巡查核实" : "当前无待核实火警"}</small></div>
+        <div data-management-kpi><dt>未闭环隐患</dt><dd>${openHazards}</dd><small>覆盖 ${companies.filter((company) => company.openHazards).length} 个车间</small></div>
+        <div data-management-kpi><dt>异常设备</dt><dd class="status-amber">${abnormalEquipment}</dd><small>故障或离线，转设施运维处理</small></div>
+        <div data-management-kpi><dt>今日巡查</dt><dd>${finishedInspection}/${inspectionRoute.length}</dd><small>已完成并闭环的检查点</small></div>
+      </dl>
+      <div class="management-grid">
+        <section class="management-panel">
+          <header><div><span>WORKSHOP RISK</span><h2>车间风险分布</h2></div><a href="#/analysis/ent-001">查看分析</a></header>
+          <div class="management-risk-list">
+            ${rankedCompanies.map((company, index) => `<a href="#/analysis/${company.id}" data-workshop-risk-row><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(company.name)}</strong><em>${company.score === null ? "数据不足" : `${company.score} 分`}</em>${riskBadge(company)}</a>`).join("")}
+          </div>
+        </section>
+        <section class="management-panel">
+          <header><div><span>OPERATIONS</span><h2>三条业务闭环</h2></div></header>
+          <div class="management-flow-list">
+            <a href="#/incidents"><i data-lucide="siren"></i><span><strong>火警与应急处置</strong><small>${activeEvents.length} 个进行中事件，${pendingFire} 个待核实火警</small></span><i data-lucide="arrow-right"></i></a>
+            <a href="#/inspections"><i data-lucide="clipboard-check"></i><span><strong>巡查与隐患整改</strong><small>${openHazards} 项未闭环，巡查员负责复查关闭</small></span><i data-lucide="arrow-right"></i></a>
+            <a href="#/station?crew_id=crew-wb-01"><i data-lucide="wrench"></i><span><strong>故障与设施维保</strong><small>${abnormalEquipment} 台异常设备，设施部门负责验收</small></span><i data-lucide="arrow-right"></i></a>
+          </div>
+          <aside class="management-note"><i data-lucide="shield-check"></i><span><strong>管理权限</strong>可查看全厂汇总和证据，但不能确认火警、派发处置、验收维保或关闭隐患。</span></aside>
+        </section>
+      </div>
+      <section class="management-panel management-weekly">
+        <header><div><span>WEEKLY HIGHLIGHT</span><h2>本周需要关注</h2></div><a href="#/analysis/ent-001">进入分析复盘</a></header>
+        <div>${issues.map((issue) => `<article><span>${escapeHtml(issue.tag)}</span><strong>${escapeHtml(issue.title)}</strong><small>${escapeHtml(issue.location)} · ${escapeHtml(issue.status)}</small></article>`).join("")}</div>
+      </section>
+    </section>
+  `;
+}
+
 function homeTemplate() {
+  if (activeRoleId === "company_management") return managementHomeTemplate();
+  const role = activeRoleDefinition();
+  const availableWorkspaces = workspaces.filter((workspace) => role.modules.includes(workspace.module));
   return `
     <section class="workspace-home" aria-labelledby="workspace-home-title">
       <header class="workspace-home-header">
-        <span>FIREOPS / FACTORY WORKSPACES</span>
-        <h1 id="workspace-home-title">选择工作台</h1>
-        <p>岗位分屏是为了角色清晰；数据走同一工单中枢。演示顺序：态势监测 → 核实/Copilot → 班组或网格待办 → 巡查复查。</p>
+        <span>FIREOPS / ROLE WORKSPACE</span>
+        <h1 id="workspace-home-title">${escapeHtml(role.label)}工作台</h1>
+        <p>当前只显示本岗位有权查看和处理的业务。角色切换不会改变合成数据，只改变菜单、任务范围和可执行动作。</p>
       </header>
-      <ol class="hub-flow" aria-label="演示串联">
-        <li><a href="#/monitoring">态势监测</a><span>看异常</span></li>
-        <li><a href="#/incidents">报警核实</a><span>确认/排除</span></li>
-        <li><a href="#/workflow">流程监管</a><span>看当前责任与下一步</span></li>
-        <li><a href="#/station">班组工单</a><span>处置/维修</span></li>
-        <li><a href="#/inspections">防火巡查</a><span>派发整改</span></li>
-        <li><a href="#/owner">网格待办</a><span>整改闭环</span></li>
-      </ol>
+      <aside class="workspace-boundary"><i data-lucide="badge-check"></i><span><strong>数据范围：${escapeHtml(ROLE_SCOPE_LABELS[role.scope] || role.scope)}</strong>可用模块 ${availableWorkspaces.length} 个；页面按角色限制入口，高风险动作仍需人工确认。</span></aside>
       <div class="workspace-grid">
-        ${workspaces.map((workspace, index) => `
-          <a class="workspace-card ${["inspections", "incidents", "station", "owner", "enterprises/ent-001", "monitoring"].includes(workspace.route) ? "workspace-card-ready" : ""}" href="#/${workspace.route}" data-workspace-link>
+        ${availableWorkspaces.map((workspace, index) => `
+          <a class="workspace-card workspace-card-ready" href="#/${workspace.route}" data-workspace-link>
             <span class="workspace-index">0${index + 1}</span>
             <span class="workspace-icon"><i data-lucide="${workspace.icon}"></i></span>
             <small>${workspace.role}</small>
@@ -789,6 +939,21 @@ function workspacePlaceholderTemplate(routeName) {
         <p>${workspace.description}</p>
         <div class="placeholder-scope"><strong>本轮已完成</strong><span>独立入口、角色边界和路由已经建立。具体业务页面按开发计划逐项接入。</span></div>
         <a class="secondary-action" href="#/home"><i data-lucide="arrow-left"></i>返回工作台</a>
+      </div>
+    </section>
+  `;
+}
+
+function roleAccessDeniedTemplate() {
+  const role = activeRoleDefinition();
+  return `
+    <section class="workspace-placeholder" aria-labelledby="role-denied-title">
+      <div class="placeholder-panel">
+        <span class="workspace-icon"><i data-lucide="shield-x"></i></span>
+        <small>ROLE SCOPE</small>
+        <h1 id="role-denied-title">当前角色无权进入此模块</h1>
+        <p>${escapeHtml(role.label)}只显示与本岗位职责有关的数据和动作。请返回工作台，或切换演示角色。</p>
+        <a class="secondary-action" href="#/home"><i data-lucide="arrow-left"></i>返回${escapeHtml(role.label)}工作台</a>
       </div>
     </section>
   `;
@@ -1292,13 +1457,14 @@ function renderRoute() {
     root = "inspections";
     history.replaceState(null, "", "#/inspections");
   }
-  document.querySelectorAll("[data-top-nav]").forEach((item) => item.classList.remove("active"));
-  document.querySelector(`[data-top-nav="${root}"]`)?.classList.add("active");
-  document.querySelectorAll("[data-mobile-nav]").forEach((item) => item.classList.toggle("active", item.dataset.mobileNav === root));
+  updateRoleNavigation(root);
+  const hasRoleAccess = root === "home" || activeRoleDefinition().modules.includes(routeModule(root));
   const importButton = document.querySelector(".header-import");
-  if (importButton) importButton.hidden = !["inspections", "analysis"].includes(root);
+  if (importButton) importButton.hidden = !hasRoleAccess || !["fire_patrol", "control_room_operator"].includes(activeRoleId) || !["inspections", "analysis"].includes(root);
   document.body.dataset.route = root;
-  if (root === "analysis") {
+  if (!hasRoleAccess) {
+    app.innerHTML = roleAccessDeniedTemplate();
+  } else if (root === "analysis") {
     if (route[1]) selectedCompanyId = route[1];
     app.innerHTML = reportTemplate();
   } else if (root === "inspections") {
@@ -1325,19 +1491,20 @@ function renderRoute() {
     app.innerHTML = homeTemplate();
   }
   bindDynamicActions();
+  applyRoleActionPermissions();
   refreshIcons();
   window.dispatchEvent(new CustomEvent("fireguard:route-rendered", { detail: { root } }));
   clearTimeout(threeDFallbackTimer);
-  if (root === "monitoring") {
+  if (root === "monitoring" && hasRoleAccess) {
     threeDFallbackTimer = setTimeout(() => {
       const host = document.querySelector("#monitoring-3d");
       if (host && host.getAttribute("data-3d-state") !== "ready") renderThreeDFallback(host);
     }, 3500);
   }
-  if (root === "enterprises") loadEnterpriseDossier(selectedCompanyId);
-  if (root === "monitoring") startMonitoringBackend();
+  if (root === "enterprises" && hasRoleAccess) loadEnterpriseDossier(selectedCompanyId);
+  if (root === "monitoring" && hasRoleAccess) startMonitoringBackend();
   else if (monitoringEventSource) stopMonitoringBackend();
-  if (["incidents", "station", "owner", "copilot", "workflow"].includes(root)) startIncidentBackend();
+  if (hasRoleAccess && ["incidents", "station", "owner", "copilot", "workflow"].includes(root)) startIncidentBackend();
   else if (incidentEventSource) stopIncidentBackend();
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -2083,10 +2250,13 @@ function bindHeaderActions() {
   document.querySelectorAll(".app-header [data-action]").forEach((button) => button.addEventListener("click", () => handleAction(button.dataset.action)));
   const actor = document.querySelector("#demo-actor");
   if (!actor) return;
-  actor.value = demoActorId;
+  actor.value = activeRoleId;
   actor.addEventListener("change", () => {
-    setDemoActor(actor.value);
+    setActiveRole(actor.value);
     showToast(`已切换演示身份：${actor.options[actor.selectedIndex].text}`);
+    const root = (location.hash || "#/home").replace(/^#\//, "").split(/[/?]/)[0] || "home";
+    if (root !== "home" && !activeRoleDefinition().modules.includes(routeModule(root))) location.hash = "#/home";
+    else renderRoute();
   });
 }
 
@@ -2096,6 +2266,7 @@ function runSelfCheck() {
   console.assert(issues.every((issue) => issue.image && issue.pin), "Every issue needs evidence and a map pin");
   console.assert(new Set(companies.map((company) => company.id)).size === companies.length, "Company IDs must be unique");
   console.assert(companies.every((company) => monitoringProfiles[company.id]), "Every company needs a monitoring profile");
+  console.assert(window.FireGuardEngine.roleDefinitions().length === 8, "Enterprise demo needs eight fixed roles");
 }
 
 window.addEventListener("fireguard:enterprise-selected", (event) => {
