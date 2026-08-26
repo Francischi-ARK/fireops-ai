@@ -44,7 +44,7 @@ async function main() {
     ["消防队签收并到场", /#\/station\?crew_id=crew-wx-01$/, "full_time_fire_brigade"],
     ["现场反馈与人工归档", /#\/incidents$/, "control_room_operator"],
     ["流程闭环与出警报告", /#\/workflow$/, "control_room_operator"],
-    ["管理层复盘", /#\/analysis\/ent-001$/, "company_management"],
+    ["管理层复盘", /#\/review\/OFFLINE-INC-001$/, "company_management"],
   ]) {
     await judgeTour.getByRole("button", { name: "下一步" }).click();
     await assertVisible(judgeTour.getByRole("heading", { name: title }));
@@ -54,6 +54,16 @@ async function main() {
   assert.equal(await judgeTour.getByRole("button", { name: "下一步" }).isDisabled(), true);
   await judgeTour.getByRole("button", { name: "退出演示" }).click();
   await assertVisible(page.getByRole("heading", { name: "消控室值班员工作台" }));
+
+  await page.goto(`${APP_ROOT}#/review/OFFLINE-INC-001`);
+  const reviewHeading = page.getByRole("heading", { name: "出警报告与战评准备" });
+  assert.equal(await reviewHeading.count(), 1, "出警报告与战评准备 page should exist");
+  await assertVisible(reviewHeading);
+  assert.equal(await page.locator("[data-review-participant]").count(), 5);
+  await page.getByRole("button", { name: "确认并生成会议邀请草稿" }).click();
+  await assertVisible(page.getByRole("button", { name: "会议邀请草稿已确认", exact: true }));
+  await page.getByRole("button", { name: "确认出警报告" }).click();
+  await assertVisible(page.getByRole("button", { name: "出警报告已确认", exact: true }));
 
   await page.locator("#demo-actor").selectOption("maintenance_contractor");
   await assertVisible(page.getByRole("heading", { name: "消防维保单位工作台" }));

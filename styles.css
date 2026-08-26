@@ -703,6 +703,7 @@ main { min-height: calc(100vh - 54px); }
   .monitoring-detail { grid-column: 1 / -1; border-top: 1px solid #263843; border-left: 0; }
   .incident-grid, .station-grid { grid-template-columns: 220px minmax(0, 1fr); }.incident-dispatch, .station-timeline { grid-column: 1 / -1; border-top: 1px solid #263843; border-left: 0; }
   .judge-tour { grid-template-columns: 74px minmax(0, 1fr) auto; right: 14px; bottom: 14px; left: 14px; width: calc(100vw - 28px); padding: 19px; }
+  .incident-review-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {
@@ -718,6 +719,11 @@ main { min-height: calc(100vh - 54px); }
   .judge-tour-copy h2 { font-size: 18px; }
   .judge-tour-controls { grid-template-columns: 42px 1fr 42px auto; }
   .judge-tour-controls button:last-child { grid-column: auto; }
+  .incident-review-page { padding: 24px 14px 90px; }
+  .incident-review-header { align-items: flex-start; flex-direction: column; }
+  .review-metrics { grid-template-columns: 1fr 1fr; }
+  .review-metrics div:nth-child(2) { border-right: 0; }
+  .review-metrics div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .workspace-home { padding: 26px 14px; }
   .workspace-home-header { margin-bottom: 20px; }
   .workspace-grid { grid-template-columns: 1fr; }
@@ -868,6 +874,27 @@ main { min-height: calc(100vh - 54px); }
 .workflow-case h2 { margin: 3px 0; font-size: 18px; }.workflow-case header small { color: var(--muted); font-size: 11px; }
 .workflow-case header > b { padding: 5px 8px; border: 1px solid var(--red); color: var(--red); font-size: 10px; }
 .workflow-case.closed header > b { color: var(--green); border-color: var(--green); }.workflow-case.closed { opacity: .72; }
+.incident-review-page { min-height: calc(100vh - 72px); padding: 32px; background: #f6f7f9; }
+.incident-review-header { display: flex; max-width: 1360px; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 auto 18px; }
+.incident-review-header span, .review-card header span { color: var(--violet); font-size: 9px; font-weight: 820; letter-spacing: .1em; }
+.incident-review-header h1 { margin: 6px 0; font-size: 34px; letter-spacing: -.035em; }
+.incident-review-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.review-metrics { display: grid; max-width: 1360px; grid-template-columns: repeat(4, 1fr); margin: 0 auto 16px; border: 1px solid var(--line-strong); background: #fff; }
+.review-metrics div { display: grid; gap: 4px; padding: 17px 20px; border-right: 1px solid var(--line); }
+.review-metrics div:last-child { border-right: 0; }
+.review-metrics dt, .review-metrics small { color: var(--muted); font-size: 10px; }.review-metrics dd { margin: 0; font-size: 22px; font-weight: 780; }
+.incident-review-grid { display: grid; max-width: 1360px; grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr); gap: 16px; margin: 0 auto; }
+.review-card { border: 1px solid var(--line-strong); background: #fff; }
+.review-card > header { display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+.review-card h2 { margin: 4px 0 0; font-size: 18px; }.review-card > header b { padding: 5px 8px; border: 1px solid var(--amber); color: #986000; font-size: 9px; }.review-card > header b.confirmed { border-color: var(--green); color: var(--green); }
+.review-report-body { display: grid; gap: 0; }.review-report-body section { padding: 16px 20px; border-bottom: 1px solid var(--line); }.review-report-body h3, .review-meeting h3 { margin: 0 0 6px; font-size: 11px; }.review-report-body p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.review-report footer { padding: 16px 20px; }.review-report footer button { width: 100%; justify-content: center; }
+.review-meeting { padding-bottom: 18px; }.review-meeting > :not(header) { margin-right: 18px; margin-left: 18px; }
+.review-meeting-time { display: flex; gap: 10px; margin-top: 18px; padding: 13px; border-left: 3px solid var(--violet); background: var(--violet-soft); }.review-meeting-time svg { flex: 0 0 auto; width: 18px; color: var(--violet); }.review-meeting-time strong, .review-meeting-time small { display: block; }.review-meeting-time small { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.review-meeting h3 { margin-top: 18px; }.review-participants { display: grid; gap: 7px; }.review-participants > div { display: grid; grid-template-columns: 30px 1fr; gap: 9px; align-items: center; }.review-participants > div > span { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #cfc6f7; color: var(--violet); background: var(--violet-soft); font-size: 10px; font-weight: 800; }.review-participants p, .review-participants strong, .review-participants small { display: block; margin: 0; }.review-participants strong { font-size: 10px; }.review-participants small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.review-meeting > button { width: calc(100% - 36px); justify-content: center; margin-top: 17px !important; }.review-boundary { display: block; color: var(--muted); font-size: 9px; text-align: center; }
+.review-timeline ol { display: grid; margin: 0; padding: 14px 20px 18px; list-style: none; }.review-timeline li { display: grid; grid-template-columns: 48px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }.review-timeline li:last-child { border-bottom: 0; }.review-timeline time { color: var(--violet); font-size: 10px; font-weight: 750; }.review-timeline strong, .review-timeline small { display: block; }.review-timeline strong { font-size: 10px; }.review-timeline small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.review-agenda ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }.review-agenda li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }.review-agenda li > span { color: var(--violet); font-size: 10px; font-weight: 820; }.review-agenda li strong { font-size: 11px; }.review-agenda li p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }.review-agenda aside { display: flex; gap: 9px; margin: 16px 18px; padding: 13px; background: #f7f5ff; }.review-agenda aside svg { flex: 0 0 auto; width: 16px; color: var(--violet); }.review-agenda aside strong, .review-agenda aside span { display: block; }.review-agenda aside span { color: var(--muted); font-size: 10px; line-height: 1.6; }.review-agenda aside strong { margin-bottom: 3px; color: var(--ink); }
 .workflow-steps { display: grid; grid-template-columns: repeat(7, 1fr); margin: 0; padding: 18px; list-style: none; }
 .workflow-steps li { position: relative; display: grid; gap: 7px; min-width: 0; padding-right: 10px; color: #a7a8ab; }
 .workflow-steps li::after { position: absolute; top: 9px; right: 0; left: 28px; height: 1px; background: var(--line); content: ""; }

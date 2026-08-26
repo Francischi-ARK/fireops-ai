@@ -193,7 +193,7 @@ const ACTOR_ROLE_IDS = {
 const ROUTE_MODULES = {
   home: "home", incidents: "emergency", workflow: "emergency", copilot: "emergency",
   inspections: "prevention", owner: "prevention",
-  analysis: "analysis", monitoring: "assets", enterprises: "assets",
+  analysis: "analysis", review: "analysis", monitoring: "assets", enterprises: "assets",
 };
 const ROLE_SCOPE_LABELS = { factory: "全厂", assigned_workshop: "本车间", assigned_workorder: "已分配工单", assigned_incident: "已分配事件" };
 const UI_ACTION_ROLES = {
@@ -216,6 +216,8 @@ const UI_ACTION_ROLES = {
   "save-report": ["control_room_operator"],
   regenerate: ["control_room_operator"],
   "confirm-report": ["control_room_operator"],
+  "confirm-review-meeting": ["control_room_operator"],
+  "confirm-review-report": ["control_room_operator"],
 };
 let activeRoleId = localStorage.getItem("fireops-active-role") || ACTOR_ROLE_IDS[localStorage.getItem("fireops-demo-actor")] || "control_room_operator";
 if (!ROLE_ACTOR_IDS[activeRoleId]) activeRoleId = "control_room_operator";
@@ -277,10 +279,11 @@ const JUDGE_TOUR_STEPS = [
   { id: "response", role: "full_time_fire_brigade", route: "#/station?crew_id=crew-wx-01", title: "消防队签收并到场", detail: "专职消防队接收危险源、优先入口和人员信息，按任务卡出动并反馈到场。", result: "现场处置状态持续回传消控室" },
   { id: "feedback", role: "control_room_operator", route: "#/incidents", title: "现场反馈与人工归档", detail: "现场反馈火势受控、人员撤离。值班员核验关键事实后结束事件。", result: "事件、人员和操作时间线已汇总" },
   { id: "archive", role: "control_room_operator", route: "#/workflow", title: "流程闭环与出警报告", detail: "系统生成出警报告草稿、参与人员清单和战评会议待办，全程保留证据引用。", result: "事件进入战评与改进行动阶段" },
-  { id: "review", role: "company_management", route: "#/analysis/ent-001", title: "管理层复盘", detail: "管理层查看事件影响、处置时效和改进行动，只读查看，不介入一线操作。", result: "一次完整火警闭环演示完成" },
+  { id: "review", role: "company_management", route: "#/review/OFFLINE-INC-001", title: "管理层复盘", detail: "管理层查看出警报告、处置时效和改进行动，只读查看，不介入一线操作。", result: "一次完整火警闭环演示完成" },
 ];
 const JUDGE_TOUR_DELAY = 3600;
 let judgeTour = { active: false, paused: false, index: 0, timer: null, restore: null };
+let reviewState = { meetingConfirmed: false, reportConfirmed: false };
 let latestAssessment = {
   ruleVersion: DEMO_RULESET,
   enterpriseId: "ent-001",
@@ -986,7 +989,7 @@ function incidentWorkflowState(incident) {
   const dispatchStatus = incident.dispatch?.status;
   const responders = incidentBackend.stations.filter((station) => station.district === incident.district && String(station.id).startsWith("crew-wx"));
   const available = responders.find((station) => station.status === "available");
-  if (incident.status === "closed" || dispatchStatus === "completed") return { current: 7, role: "已完成", action: "查看归档记录", actor: "duty-demo", route: `#/incidents?incident_id=${incident.id}` };
+  if (incident.status === "closed" || dispatchStatus === "completed") return { current: 7, role: "已完成", action: "准备出警报告与战评", actor: "duty-demo", route: `#/review/${incident.id}` };
   if (!incident.dispatch) {
     if (!available && responders[0]) return { current: 2, role: "处置班组", action: "先完成占用班组的当前任务", actor: "crew-demo", crewId: responders[0].id, route: `#/station?crew_id=${responders[0].id}` };
     return { current: 2, role: "消控室值班员", action: "选择处置站并派发", actor: "duty-demo", route: `#/incidents?incident_id=${incident.id}` };
@@ -1027,6 +1030,70 @@ function workflowSupervisionTemplate() {
           const state = incidentWorkflowState(incident);
           return `<article class="workflow-case ${incident.status === "closed" ? "closed" : ""}"><header><div><span>EVENT #${incident.id}</span><h2>${escapeHtml(incident.enterprise_name)}</h2><small>${escapeHtml(incident.district)} · ${escapeHtml(incident.response_brief.address)}</small></div><b>${window.FireGuardEngine.incidentStatusLabel(incident.status)}</b></header>${workflowStepsTemplate(state.current)}<footer><p><span>当前责任</span><strong>${state.role}</strong><small>下一步：${state.action}</small></p><button type="button" data-workflow-continue data-actor="${state.actor}" data-incident-id="${incident.id}" data-crew-id="${state.crewId || ""}" data-route="${state.route}">${state.action}</button></footer></article>`;
         }).join("") || (pendingSignals.length ? "" : `<div class="workflow-empty">当前没有事件流程。请先从态势监测注入一条模拟火警帧。</div>`)}
+      </div>
+    </section>`;
+}
+
+function incidentReviewTemplate(eventId = "OFFLINE-INC-001") {
+  const participants = [
+    ["消控室值班员", "事件记录与设备操作确认"],
+    ["防火巡查人员", "现场核实与首报"],
+    ["专职消防队", "火灾扑救与现场反馈"],
+    ["电池车间 ERT", "人员疏散与工艺协同"],
+    ["车间问题对接人", "后续改进行动协调"],
+  ];
+  const timeline = [
+    ["10:24", "报警接入", "烟感与相邻探测器信号进入平台"],
+    ["10:26", "巡查受领", "系统下发点位、楼层和推荐入口"],
+    ["10:29", "确认火警", "巡查人员反馈发现明火"],
+    ["10:31", "消防队出动", "专职消防队与车间 ERT 同步受领"],
+    ["10:36", "到达现场", "按南门入口进入 PACK 产线 A1"],
+    ["10:44", "火势受控", "现场反馈人员已撤离，持续监护复燃"],
+    ["10:49", "事件结束", "值班员核验反馈并完成归档"],
+  ];
+  return `
+    <section class="incident-review-page" aria-labelledby="incident-review-title">
+      <header class="incident-review-header">
+        <div><span>AFTER ACTION REVIEW / SYNTHETIC EVENT</span><h1 id="incident-review-title">出警报告与战评准备</h1><p>事件 ${escapeHtml(eventId)} · 电池车间 2F PACK 产线 A1 · 固定合成回放</p></div>
+        <a class="secondary-action" href="#/workflow"><i data-lucide="arrow-left"></i>返回流程监管</a>
+      </header>
+      <dl class="review-metrics">
+        <div><dt>报警至确认</dt><dd>5 分钟</dd><small>人工现场核实</small></div>
+        <div><dt>确认至出动</dt><dd>2 分钟</dd><small>消防队与 ERT 同步调派</small></div>
+        <div><dt>出动至到场</dt><dd>5 分钟</dd><small>南门推荐入口</small></div>
+        <div><dt>事件总时长</dt><dd>25 分钟</dd><small>10:24–10:49</small></div>
+      </dl>
+      <div class="incident-review-grid">
+        <article class="review-card review-report">
+          <header><div><span>INCIDENT REPORT</span><h2>出警报告草稿</h2></div><b class="${reviewState.reportConfirmed ? "confirmed" : ""}">${reviewState.reportConfirmed ? "已确认" : "待人工确认"}</b></header>
+          <div class="review-report-body">
+            <section><h3>事件摘要</h3><p>电池车间 PACK 半成品缓存区发生明火。巡查人员现场确认后，消控室调派专职消防队和车间 ERT；现场处置后火势受控，无人员被困。</p></section>
+            <section><h3>处置结果</h3><p>明火已扑灭，人员完成疏散。现场继续执行复燃监护，并对报警点位、相邻电气设备和半成品缓存区开展专项检查。</p></section>
+            <section><h3>数据边界</h3><p>报告由固定合成事件、岗位反馈和时间线生成，不代表真实事故结论；关键事实须由值班员确认。</p></section>
+          </div>
+          <footer><button type="button" class="primary-action" data-action="confirm-review-report" ${reviewState.reportConfirmed ? "disabled" : ""}><i data-lucide="check-check"></i>${reviewState.reportConfirmed ? "出警报告已确认" : "确认出警报告"}</button></footer>
+        </article>
+        <article class="review-card review-meeting">
+          <header><div><span>MEETING DRAFT</span><h2>Teams 战评会议</h2></div><b class="${reviewState.meetingConfirmed ? "confirmed" : ""}">${reviewState.meetingConfirmed ? "草稿已确认" : "待值班员确认"}</b></header>
+          <div class="review-meeting-time"><i data-lucide="calendar-clock"></i><span><strong>建议时间：事件结束后 24 小时内</strong><small>会议时长 45 分钟 · 线上 + 消控室会议室</small></span></div>
+          <h3>根据事件记录识别的参会人员</h3>
+          <div class="review-participants">${participants.map(([name, duty]) => `<div data-review-participant><span>${escapeHtml(name.slice(0, 1))}</span><p><strong>${escapeHtml(name)}</strong><small>${escapeHtml(duty)}</small></p></div>`).join("")}</div>
+          <button type="button" class="primary-action" data-action="confirm-review-meeting" ${reviewState.meetingConfirmed ? "disabled" : ""}><i data-lucide="send"></i>${reviewState.meetingConfirmed ? "会议邀请草稿已确认" : "确认并生成会议邀请草稿"}</button>
+          <small class="review-boundary">演示版不连接 Microsoft Teams，也不会自动发送邀请。</small>
+        </article>
+        <article class="review-card review-timeline">
+          <header><div><span>AUDIT TIMELINE</span><h2>事件时间线</h2></div><b>7 个节点</b></header>
+          <ol>${timeline.map(([time, title, note]) => `<li><time>${time}</time><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(note)}</small></span></li>`).join("")}</ol>
+        </article>
+        <article class="review-card review-agenda">
+          <header><div><span>AI DRAFT / EVIDENCE LINKED</span><h2>战评议题与改进行动</h2></div><b>待会议确认</b></header>
+          <ol>
+            <li><span>01</span><div><strong>核实阶段</strong><p>报警至现场确认用时 5 分钟。复盘巡查人员当前位置和南门入口推荐是否准确。</p></div></li>
+            <li><span>02</span><div><strong>调派阶段</strong><p>消防队与 ERT 在 2 分钟内同步受领。核对对讲机定位、人员签到和岗位简报是否一致。</p></div></li>
+            <li><span>03</span><div><strong>现场处置</strong><p>补充复燃监护时长、受影响设备和半成品批次，形成车间专项检查任务。</p></div></li>
+          </ol>
+          <aside><i data-lucide="sparkles"></i><span><strong>AI 的作用</strong>汇总时间线、识别参与人员、生成报告和议题草稿；事实确认、责任认定和改进行动仍由战评会议决定。</span></aside>
+        </article>
       </div>
     </section>`;
 }
@@ -1485,6 +1552,8 @@ function renderRoute() {
   document.body.dataset.route = root;
   if (!hasRoleAccess) {
     app.innerHTML = roleAccessDeniedTemplate();
+  } else if (root === "review") {
+    app.innerHTML = incidentReviewTemplate(route[1]);
   } else if (root === "analysis") {
     if (route[1]) selectedCompanyId = route[1];
     app.innerHTML = reportTemplate();
@@ -2144,6 +2213,16 @@ function renderWorkflow(issue) {
 
 function handleAction(action, issueId) {
   if (action === "start-judge-tour") return startJudgeTour();
+  if (action === "confirm-review-meeting") {
+    reviewState.meetingConfirmed = true;
+    renderRoute();
+    return showToast("会议邀请草稿已确认，未发送到真实 Teams");
+  }
+  if (action === "confirm-review-report") {
+    reviewState.reportConfirmed = true;
+    renderRoute();
+    return showToast("出警报告已确认，战评结论仍待会议形成");
+  }
   if (action === "go-inspections") {
     location.hash = "#/inspections";
     return;
