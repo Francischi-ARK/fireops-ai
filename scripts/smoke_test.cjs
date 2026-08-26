@@ -29,22 +29,24 @@ async function main() {
 
   await page.getByRole("button", { name: "评委模式" }).click();
   const judgeTour = page.locator("#judge-tour");
-  await assertVisible(judgeTour.getByRole("heading", { name: "报警接入与定位" }));
-  assert.match(page.url(), /#\/monitoring$/);
-  await page.locator('#judge-tour[data-step-index="1"]').waitFor({ state: "visible", timeout: 5000 });
-  await assertVisible(judgeTour.getByRole("heading", { name: "AI 研判与证据补全" }));
-  assert.match(page.url(), /#\/copilot$/);
+  const firstJudgeStep = judgeTour.getByRole("heading", { name: "巡查计划与现场发现" });
+  assert.equal(await firstJudgeStep.count(), 1, "Judge tour should start with 巡查计划与现场发现");
+  await assertVisible(firstJudgeStep);
+  assert.match(page.url(), /#\/inspections$/);
   await judgeTour.getByRole("button", { name: "暂停" }).click();
-  await judgeTour.getByRole("button", { name: "下一步" }).click();
-  await assertVisible(judgeTour.getByRole("heading", { name: "巡查人员现场核实" }));
-  assert.match(page.url(), /#\/monitoring$/);
-  assert.equal(await page.locator("#demo-actor").inputValue(), "fire_patrol");
   for (const [title, route, role] of [
+    ["车间整改与证据回传", /#\/owner$/, "workshop_liaison"],
+    ["巡查复查闸门", /#\/inspections$/, "fire_patrol"],
+    ["设施维保审核与派发", /#\/station\?crew_id=crew-wb-01$/, "facility_department"],
+    ["报警接入与定位", /#\/monitoring$/, "control_room_operator"],
+    ["AI 研判与证据补全", /#\/copilot$/, "control_room_operator"],
+    ["巡查人员现场核实", /#\/monitoring$/, "fire_patrol"],
     ["消控室升级并调派", /#\/copilot$/, "control_room_operator"],
     ["消防队签收并到场", /#\/station\?crew_id=crew-wx-01$/, "full_time_fire_brigade"],
     ["现场反馈与人工归档", /#\/incidents$/, "control_room_operator"],
     ["流程闭环与出警报告", /#\/workflow$/, "control_room_operator"],
     ["管理层复盘", /#\/review\/OFFLINE-INC-001$/, "company_management"],
+    ["全厂周报与改进建议", /#\/weekly$/, "company_management"],
   ]) {
     await judgeTour.getByRole("button", { name: "下一步" }).click();
     await assertVisible(judgeTour.getByRole("heading", { name: title }));
@@ -170,7 +172,7 @@ async function main() {
   await page.getByRole("button", { name: "评委模式" }).click();
   await page.locator("#judge-tour").getByRole("button", { name: "暂停" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  await assertVisible(page.locator("#judge-tour").getByRole("heading", { name: "报警接入与定位" }));
+  await assertVisible(page.locator("#judge-tour").getByRole("heading", { name: "巡查计划与现场发现" }));
   await page.locator("#judge-tour").getByRole("button", { name: "退出演示" }).click();
   } finally {
   await browser.close();

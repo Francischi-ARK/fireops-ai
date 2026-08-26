@@ -272,6 +272,10 @@ const CREW_OPTIONS = [
   { id: "crew-wx-02", label: "微型消防站·东区（处置）" },
 ];
 const JUDGE_TOUR_STEPS = [
+  { id: "inspection", role: "fire_patrol", route: "#/inspections", title: "巡查计划与现场发现", detail: "巡查人员按计划检查重点区域，照片和口述先生成隐患草稿，确认后才进入整改流程。", result: "隐患候选、位置和证据已汇总，等待人工确认" },
+  { id: "rectification", role: "workshop_liaison", route: "#/owner", title: "车间整改与证据回传", detail: "车间问题对接人只接收本车间任务，协调清除通道遮挡并上传整改结果。", result: "整改处理中，完成后转交巡查人员复查" },
+  { id: "reinspection", role: "fire_patrol", route: "#/inspections", title: "巡查复查闸门", detail: "巡查人员复核现场与整改证据；通过后关闭，不通过则退回原责任人继续整改。", result: "整改闭环必须经过独立复查" },
+  { id: "maintenance", role: "facility_department", route: "#/station?crew_id=crew-wb-01", title: "设施维保审核与派发", detail: "设施部门核对逾期原因、设备台账和工单草稿，再人工派给消防维保单位处理。", result: "AI 负责检索和起草，设施部门保留审批权" },
   { id: "alarm", role: "control_room_operator", route: "#/monitoring", title: "报警接入与定位", detail: "火警主机信号进入平台，系统定位到电池车间 2F PACK 产线 A1。", result: "设备事件已进入待核实队列" },
   { id: "analysis", role: "control_room_operator", route: "#/copilot", title: "AI 研判与证据补全", detail: "Agent 读取点位、相邻探测器、维保记录和处置手册，生成现场核实任务草稿。", result: "AI 只给建议，火警结论仍由现场人员确认" },
   { id: "verification", role: "fire_patrol", route: "#/monitoring", title: "巡查人员现场核实", detail: "巡查人员收到点位、楼层和推荐入口，到场后反馈发现明火。", result: "真实火警已由人工确认" },
@@ -280,6 +284,7 @@ const JUDGE_TOUR_STEPS = [
   { id: "feedback", role: "control_room_operator", route: "#/incidents", title: "现场反馈与人工归档", detail: "现场反馈火势受控、人员撤离。值班员核验关键事实后结束事件。", result: "事件、人员和操作时间线已汇总" },
   { id: "archive", role: "control_room_operator", route: "#/workflow", title: "流程闭环与出警报告", detail: "系统生成出警报告草稿、参与人员清单和战评会议待办，全程保留证据引用。", result: "事件进入战评与改进行动阶段" },
   { id: "review", role: "company_management", route: "#/review/OFFLINE-INC-001", title: "管理层复盘", detail: "管理层查看出警报告、处置时效和改进行动，只读查看，不介入一线操作。", result: "一次完整火警闭环演示完成" },
+  { id: "weekly", role: "company_management", route: "#/weekly", title: "全厂周报与改进建议", detail: "平台汇总火警、巡查、整改和设施故障，按车间与问题类型形成周报和改进建议。", result: "三条业务链进入同一管理视图，完整演示结束" },
 ];
 const JUDGE_TOUR_DELAY = 3600;
 let judgeTour = { active: false, paused: false, index: 0, timer: null, restore: null };
@@ -2429,13 +2434,13 @@ function seedJudgeTourIncident(stepIndex) {
     report: hasReport ? { situation: "明火已扑灭，人员全部撤离；持续监护复燃风险。", people_status: "no_risk" } : null,
   } : null;
   incidentBackend.status = "offline";
-  incidentBackend.signals = stepIndex < 3 ? [{ monitoring_event_id: "OFFLINE-001", enterprise_name: "电池车间（PACK/化成）", verification_status: "pending", occurred_at: "2026-08-26T10:24:00+08:00" }] : [];
+  incidentBackend.signals = stepIndex >= 0 && stepIndex < 3 ? [{ monitoring_event_id: "OFFLINE-001", enterprise_name: "电池车间（PACK/化成）", verification_status: "pending", occurred_at: "2026-08-26T10:24:00+08:00" }] : [];
   incidentBackend.incidents = incident ? [incident] : [];
-  incidentBackend.stations = [{ id: "crew-wx-01", name: "专职消防队·西区站（合成）", district: "西区", status: closed ? "available" : "on_scene" }];
+  incidentBackend.stations = [{ id: "crew-wx-01", name: "专职消防队·西区站（合成）", district: "西区", status: stepIndex >= 4 && !closed ? "on_scene" : "available" }];
   incidentBackend.station = incidentBackend.stations[0];
   incidentBackend.tasks = incident ? [incident] : [];
   incidentBackend.inbox = incident ? [{ inbox_id: "dispatch-OFFLINE-DISPATCH-001", source: "incident_dispatch", dispatch_id: dispatch.id, incident_id: incident.id, kind: "response", enterprise_name: incident.enterprise_name, summary: "电池车间 PACK 产线火警处置", status: dispatch.status }] : [];
-  selectedSignalEventId = stepIndex < 3 ? "OFFLINE-001" : null;
+  selectedSignalEventId = stepIndex >= 0 && stepIndex < 3 ? "OFFLINE-001" : null;
   selectedIncidentId = incident?.id || null;
   selectedInboxId = incident ? "dispatch-OFFLINE-DISPATCH-001" : null;
   terminalStationId = "crew-wx-01";
@@ -2443,7 +2448,21 @@ function seedJudgeTourIncident(stepIndex) {
 
 function prepareJudgeTourStep(stepIndex) {
   const step = JUDGE_TOUR_STEPS[stepIndex];
-  seedJudgeTourIncident(stepIndex);
+  const fireStepIndex = stepIndex - 4;
+  seedJudgeTourIncident(fireStepIndex);
+  selectedCompanyId = "ent-001";
+  selectedIssueId = step.id === "reinspection" ? "hazard-01" : "hazard-02";
+  if (step.id === "rectification") {
+    terminalOwnerName = "李强";
+    selectedInboxId = "workorder-OFFLINE-RECT-001";
+    incidentBackend.station = { id: "owner", name: "车间问题对接人 · 李强", status: "available" };
+    incidentBackend.inbox = [{ inbox_id: selectedInboxId, source: "ops_workorder", workorder_id: "OFFLINE-RECT-001", finding_id: "hazard-02", kind: "rectification", enterprise_name: "电池车间（PACK/化成）", summary: "PACK 通道东侧灭火器被物料遮挡", owner: "李强", status: "in_progress" }];
+  } else if (step.id === "maintenance") {
+    terminalStationId = "crew-wb-01";
+    selectedInboxId = "workorder-OFFLINE-MAINT-001";
+    incidentBackend.station = { id: terminalStationId, name: "消防设施维保组（合成）", status: "available" };
+    incidentBackend.inbox = [{ inbox_id: selectedInboxId, source: "ops_workorder", workorder_id: "OFFLINE-MAINT-001", kind: "maintenance", enterprise_name: "电池车间（PACK/化成）", summary: "火灾报警控制器季度维保逾期，待设施部门确认派发", owner: "消防设施部门", crew_id: terminalStationId, status: "draft" }];
+  }
   monitoringState.spatialLevel = step.id === "alarm" ? "factory" : "workshop";
   monitoringState.selectedId = monitoringState.events.find((event) => event.enterpriseId === "ent-001")?.id || monitoringState.selectedId;
   monitoringState.floor = "2F";
@@ -2452,10 +2471,10 @@ function prepareJudgeTourStep(stepIndex) {
   copilotState.offline = true;
   copilotState.judgeMode = true;
   copilotState.eventId = "OFFLINE-001";
-  copilotState.run = stepIndex >= 3 ? buildOfflineCopilotRun("dispatch") : stepIndex >= 1 ? buildOfflineCopilotRun("verification") : null;
-  copilotState.phase = stepIndex >= 6 ? "archived" : stepIndex >= 4 ? "crew_simulation" : stepIndex >= 3 ? "dispatch" : stepIndex >= 1 ? "verification" : "select";
-  copilotState.dispatch = stepIndex >= 3 ? "crew-wx-01" : null;
-  copilotState.verification = stepIndex >= 2 ? "confirmed" : null;
+  copilotState.run = fireStepIndex >= 3 ? buildOfflineCopilotRun("dispatch") : fireStepIndex >= 1 ? buildOfflineCopilotRun("verification") : null;
+  copilotState.phase = fireStepIndex >= 6 ? "archived" : fireStepIndex >= 4 ? "crew_simulation" : fireStepIndex >= 3 ? "dispatch" : fireStepIndex >= 1 ? "verification" : "select";
+  copilotState.dispatch = fireStepIndex >= 3 ? "crew-wx-01" : null;
+  copilotState.verification = fireStepIndex >= 2 ? "confirmed" : null;
   copilotState.judgeProgress = JUDGE_TOUR_STEPS.slice(0, stepIndex + 1).map((item) => item.title);
 }
 
@@ -2512,6 +2531,7 @@ function startJudgeTour() {
     restore: {
       role: activeRoleId, hash: location.hash || "#/home",
       incident: structuredClone(incidentBackend), copilot: structuredClone(copilotState), monitoring: structuredClone(monitoringState),
+      selectedCompanyId, selectedIssueId, selectedSignalEventId, selectedIncidentId, selectedInboxId, terminalStationId, terminalOwnerName,
     },
   };
   stopIncidentBackend();
@@ -2527,6 +2547,7 @@ function stopJudgeTour() {
   incidentBackend = restore.incident;
   copilotState = restore.copilot;
   monitoringState = restore.monitoring;
+  ({ selectedCompanyId, selectedIssueId, selectedSignalEventId, selectedIncidentId, selectedInboxId, terminalStationId, terminalOwnerName } = restore);
   setActiveRole(restore.role);
   renderJudgeTourController();
   if (location.hash === restore.hash) renderRoute();
