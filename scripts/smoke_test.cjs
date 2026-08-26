@@ -64,6 +64,14 @@ async function main() {
   await assertVisible(page.getByRole("button", { name: "会议邀请草稿已确认", exact: true }));
   await page.getByRole("button", { name: "确认出警报告" }).click();
   await assertVisible(page.getByRole("button", { name: "出警报告已确认", exact: true }));
+  const weeklyLink = page.getByRole("link", { name: "消防周报" });
+  assert.equal(await weeklyLink.count(), 1, "分析复盘 should expose 消防周报");
+  await weeklyLink.click();
+  const weeklyHeading = page.getByRole("heading", { name: "消防安全周报" });
+  assert.equal(await weeklyHeading.count(), 1, "消防安全周报 page should exist");
+  await assertVisible(weeklyHeading);
+  assert.equal(await page.locator("[data-weekly-category]").count(), 4);
+  assert.equal(await page.locator("[data-weekly-workshop]").count(), 5);
 
   await page.locator("#demo-actor").selectOption("maintenance_contractor");
   await assertVisible(page.getByRole("heading", { name: "消防维保单位工作台" }));

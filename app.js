@@ -193,7 +193,7 @@ const ACTOR_ROLE_IDS = {
 const ROUTE_MODULES = {
   home: "home", incidents: "emergency", workflow: "emergency", copilot: "emergency",
   inspections: "prevention", owner: "prevention",
-  analysis: "analysis", review: "analysis", monitoring: "assets", enterprises: "assets",
+  analysis: "analysis", weekly: "analysis", review: "analysis", monitoring: "assets", enterprises: "assets",
 };
 const ROLE_SCOPE_LABELS = { factory: "全厂", assigned_workshop: "本车间", assigned_workorder: "已分配工单", assigned_incident: "已分配事件" };
 const UI_ACTION_ROLES = {
@@ -911,7 +911,7 @@ function managementHomeTemplate() {
         </section>
       </div>
       <section class="management-panel management-weekly">
-        <header><div><span>WEEKLY HIGHLIGHT</span><h2>本周需要关注</h2></div><a href="#/analysis/ent-001">进入分析复盘</a></header>
+        <header><div><span>WEEKLY HIGHLIGHT</span><h2>本周需要关注</h2></div><a href="#/weekly">查看消防周报</a></header>
         <div>${issues.map((issue) => `<article><span>${escapeHtml(issue.tag)}</span><strong>${escapeHtml(issue.title)}</strong><small>${escapeHtml(issue.location)} · ${escapeHtml(issue.status)}</small></article>`).join("")}</div>
       </section>
     </section>
@@ -1053,6 +1053,7 @@ function incidentReviewTemplate(eventId = "OFFLINE-INC-001") {
   ];
   return `
     <section class="incident-review-page" aria-labelledby="incident-review-title">
+      ${analysisSubnav("review")}
       <header class="incident-review-header">
         <div><span>AFTER ACTION REVIEW / SYNTHETIC EVENT</span><h1 id="incident-review-title">出警报告与战评准备</h1><p>事件 ${escapeHtml(eventId)} · 电池车间 2F PACK 产线 A1 · 固定合成回放</p></div>
         <a class="secondary-action" href="#/workflow"><i data-lucide="arrow-left"></i>返回流程监管</a>
@@ -1505,11 +1506,32 @@ function equipmentPanelContent() {
   `;
 }
 
+function analysisSubnav(active) {
+  return `<nav class="analysis-subnav" aria-label="分析复盘子模块"><a href="#/analysis/ent-001" class="${active === "risk" ? "active" : ""}">车间风险</a><a href="#/weekly" class="${active === "weekly" ? "active" : ""}">消防周报</a><a href="#/review/OFFLINE-INC-001" class="${active === "review" ? "active" : ""}">出警战评</a></nav>`;
+}
+
+function weeklyReportTemplate() {
+  const categories = [["消防设施", 5, 36], ["应急疏散", 4, 29], ["电气防火", 3, 21], ["建筑防火", 2, 14]];
+  const workshops = [["电池车间", 5, 60], ["涂装车间", 4, 75], ["总装车间", 3, 100], ["冲压车间", 1, 100], ["立体仓库", 1, 100]];
+  return `
+    <section class="weekly-report-page" aria-labelledby="weekly-report-title">
+      ${analysisSubnav("weekly")}
+      <header class="weekly-report-header"><div><span>WEEKLY FIRE SAFETY / SYNTHETIC DATA</span><h1 id="weekly-report-title">消防安全周报</h1><p>2026-08-17 至 2026-08-23 · 全厂防火巡查、设施故障和整改闭环汇总</p></div><button type="button" class="secondary-action" data-action="weekly-export"><i data-lucide="file-check-2"></i>生成周报草稿</button></header>
+      <dl class="weekly-kpis"><div><dt>本周发现</dt><dd>14</dd><small>较上周增加 2 项</small></div><div><dt>已完成整改</dt><dd>11</dd><small>剩余 3 项处理中</small></div><div><dt>整改完成率</dt><dd>79%</dd><small>目标值 ≥ 90%</small></div><div><dt>重复问题</dt><dd>3</dd><small>集中在电池与涂装车间</small></div></dl>
+      <div class="weekly-grid">
+        <article class="weekly-card"><header><div><span>ISSUE CATEGORY</span><h2>问题类型分布</h2></div><b>14 项</b></header><div class="weekly-category-list">${categories.map(([name, count, percent]) => `<div data-weekly-category><span><strong>${name}</strong><small>${count} 项 · ${percent}%</small></span><i><b style="width:${percent}%"></b></i></div>`).join("")}</div></article>
+        <article class="weekly-card"><header><div><span>WORKSHOP COMPARISON</span><h2>车间问题与整改率</h2></div><b>5 个车间</b></header><div class="weekly-workshop-list">${workshops.map(([name, count, rate], index) => `<div data-weekly-workshop><span>${String(index + 1).padStart(2, "0")}</span><strong>${name}</strong><em>${count} 项</em><i><b style="width:${rate}%"></b></i><small>${rate}%</small></div>`).join("")}</div></article>
+        <article class="weekly-card weekly-trend"><header><div><span>FOUR WEEK TREND</span><h2>隐患发现与关闭趋势</h2></div><b>近 4 周</b></header><div class="weekly-bars">${[[9, 8], [12, 10], [12, 11], [14, 11]].map(([found, closed], index) => `<div><span><i style="height:${found * 6}px"></i><b style="height:${closed * 6}px"></b></span><small>第 ${index + 1} 周</small></div>`).join("")}</div><footer><span><i></i>发现问题</span><span><i></i>完成整改</span></footer></article>
+        <article class="weekly-card weekly-ai"><header><div><span>AI ANALYSIS / EVIDENCE LINKED</span><h2>本周管理建议</h2></div><b>待管理层审阅</b></header><ol><li><span>01</span><p><strong>优先处理电池车间 2 项逾期问题</strong><small>本周问题数量最高，整改率仅 60%；建议由车间对接人明确完成时间。</small></p></li><li><span>02</span><p><strong>核查涂装车间重复设施问题</strong><small>近四周出现 2 次同类探测器污染报警，应关联维保记录复盘根因。</small></p></li><li><span>03</span><p><strong>把应急疏散问题加入下周专项巡查</strong><small>本周占全部问题的 29%，重点检查通道、出口和疏散指示标志。</small></p></li></ol><aside><i data-lucide="shield-check"></i><span>建议只引用结构化周报数据，不自动认定责任，也不替代 EHS 与车间管理判断。</span></aside></article>
+      </div>
+    </section>`;
+}
+
 function reportTemplate() {
   const company = selectedCompany();
   const assessment = company.id === latestAssessment.enterpriseId ? latestAssessment : null;
   if (!assessment) return `
-    <section class="report-page report-empty-page">
+    <section class="report-page report-empty-page">${analysisSubnav("risk")}
       <header class="report-header"><div><span>FIRE SAFETY ASSESSMENT</span><h1>${escapeHtml(company.name)}消防健康报告</h1><p>用于完成风险评分后的研判，以及月度、季度消防复盘。</p></div><a href="#/inspections" class="secondary-action"><i data-lucide="arrow-left"></i>返回防火巡查</a></header>
       <div class="report-empty-state"><i data-lucide="file-warning"></i><h2>暂无评分数据</h2><p>当前车间还没有可用于生成报告的结构化评分。请先导入数据，或载入固定演示数据查看完整报告。</p><button type="button" class="primary-action" data-action="use-demo-assessment">使用演示数据</button><small>演示数据不会写入数据库，也不代表真实检查结论。</small></div>
     </section>`;
@@ -1517,7 +1539,7 @@ function reportTemplate() {
   const level = assessment.riskLevel;
   const rules = assessment.triggeredRules || [];
   return `
-    <section class="report-page">
+    <section class="report-page">${analysisSubnav("risk")}
         <header class="report-header"><div><span>结构化模板生成 · ${assessment.ruleVersion || DEMO_RULESET}</span><h1>${escapeHtml(company.name)}消防健康报告</h1><p>用于风险评分后或周期复盘 · 数据截止 ${assessment.dataCutoff?.replace("T", " ").slice(0, 16) || DATA_CUTOFF} · 当前得分 ${scoreText(score)} · ${riskLabel(level)}</p></div><a href="#/inspections" class="secondary-action"><i data-lucide="arrow-left"></i>返回防火巡查</a></header>
       <div class="report-layout">
         <aside class="report-facts"><h2>结构化事实</h2><div><span>触发规则</span><strong>${rules.length}</strong></div><div><span>累计扣分</span><strong>${score === null ? "—" : 100 - score}</strong></div><div><span>原始证据</span><strong>${rules.reduce((sum, rule) => sum + rule.evidence.length, 0)}</strong></div><div><span>数据状态</span><strong>${level === "unrated" ? "不足" : "完整"}</strong></div><p>输入指纹 ${assessment.inputHash || "演示固定输入"}<br />以上字段来自确定性规则，报告不得改写数值。</p></aside>
@@ -1554,6 +1576,8 @@ function renderRoute() {
     app.innerHTML = roleAccessDeniedTemplate();
   } else if (root === "review") {
     app.innerHTML = incidentReviewTemplate(route[1]);
+  } else if (root === "weekly") {
+    app.innerHTML = weeklyReportTemplate();
   } else if (root === "analysis") {
     if (route[1]) selectedCompanyId = route[1];
     app.innerHTML = reportTemplate();
@@ -2223,6 +2247,7 @@ function handleAction(action, issueId) {
     renderRoute();
     return showToast("出警报告已确认，战评结论仍待会议形成");
   }
+  if (action === "weekly-export") return showToast("周报草稿已生成，数据为固定合成回放");
   if (action === "go-inspections") {
     location.hash = "#/inspections";
     return;
