@@ -269,6 +269,18 @@ const CREW_OPTIONS = [
   { id: "crew-wb-01", label: "消防设施维保组（维修/维保）" },
   { id: "crew-wx-02", label: "微型消防站·东区（处置）" },
 ];
+const JUDGE_TOUR_STEPS = [
+  { id: "alarm", role: "control_room_operator", route: "#/monitoring", title: "报警接入与定位", detail: "火警主机信号进入平台，系统定位到电池车间 2F PACK 产线 A1。", result: "设备事件已进入待核实队列" },
+  { id: "analysis", role: "control_room_operator", route: "#/copilot", title: "AI 研判与证据补全", detail: "Agent 读取点位、相邻探测器、维保记录和处置手册，生成现场核实任务草稿。", result: "AI 只给建议，火警结论仍由现场人员确认" },
+  { id: "verification", role: "fire_patrol", route: "#/monitoring", title: "巡查人员现场核实", detail: "巡查人员收到点位、楼层和推荐入口，到场后反馈发现明火。", result: "真实火警已由人工确认" },
+  { id: "dispatch", role: "control_room_operator", route: "#/copilot", title: "消控室升级并调派", detail: "系统生成处置草稿，值班员确认后调派专职消防队和对应车间 ERT。", result: "处置任务和岗位简报已同步" },
+  { id: "response", role: "full_time_fire_brigade", route: "#/station?crew_id=crew-wx-01", title: "消防队签收并到场", detail: "专职消防队接收危险源、优先入口和人员信息，按任务卡出动并反馈到场。", result: "现场处置状态持续回传消控室" },
+  { id: "feedback", role: "control_room_operator", route: "#/incidents", title: "现场反馈与人工归档", detail: "现场反馈火势受控、人员撤离。值班员核验关键事实后结束事件。", result: "事件、人员和操作时间线已汇总" },
+  { id: "archive", role: "control_room_operator", route: "#/workflow", title: "流程闭环与出警报告", detail: "系统生成出警报告草稿、参与人员清单和战评会议待办，全程保留证据引用。", result: "事件进入战评与改进行动阶段" },
+  { id: "review", role: "company_management", route: "#/analysis/ent-001", title: "管理层复盘", detail: "管理层查看事件影响、处置时效和改进行动，只读查看，不介入一线操作。", result: "一次完整火警闭环演示完成" },
+];
+const JUDGE_TOUR_DELAY = 3600;
+let judgeTour = { active: false, paused: false, index: 0, timer: null, restore: null };
 let latestAssessment = {
   ruleVersion: DEMO_RULESET,
   enterpriseId: "ent-001",
@@ -487,6 +499,10 @@ async function refreshMonitoringFromBackend() {
 }
 
 function startMonitoringBackend() {
+  if (judgeTour.active) {
+    updateMonitoringConnection("offline");
+    return;
+  }
   if (!monitoringInitialized) {
     monitoringInitialized = true;
     refreshMonitoringFromBackend();
@@ -585,6 +601,7 @@ function incidentTime(value) {
 }
 
 async function refreshIncidentBackend() {
+  if (judgeTour.active) return;
   try {
     const overviewResponse = await fetch(`${MONITORING_API_BASE}/incidents/overview`);
     if (!overviewResponse.ok) throw new Error("incident_api_unavailable");
@@ -645,6 +662,10 @@ function scheduleIncidentRefresh() {
 }
 
 function startIncidentBackend() {
+  if (judgeTour.active) {
+    incidentBackend.status = "offline";
+    return;
+  }
   if (!incidentInitialized) {
     incidentInitialized = true;
     scheduleIncidentRefresh();
@@ -2122,6 +2143,7 @@ function renderWorkflow(issue) {
 }
 
 function handleAction(action, issueId) {
+  if (action === "start-judge-tour") return startJudgeTour();
   if (action === "go-inspections") {
     location.hash = "#/inspections";
     return;
@@ -2267,6 +2289,157 @@ function runSelfCheck() {
   console.assert(new Set(companies.map((company) => company.id)).size === companies.length, "Company IDs must be unique");
   console.assert(companies.every((company) => monitoringProfiles[company.id]), "Every company needs a monitoring profile");
   console.assert(window.FireGuardEngine.roleDefinitions().length === 8, "Enterprise demo needs eight fixed roles");
+}
+
+function seedJudgeTourIncident(stepIndex) {
+  const hasIncident = stepIndex >= 3;
+  const hasReport = stepIndex >= 5;
+  const closed = stepIndex >= 6;
+  const dispatchStatus = closed ? "completed" : stepIndex >= 4 ? "arrived" : "issued";
+  const incidentStatus = closed ? "closed" : stepIndex >= 4 ? "arrived" : "dispatched";
+  const timeline = [
+    ["incident_created", "消控室值班员（演示）", "巡查人员确认现场明火"],
+    ["dispatch_issued", "消控室值班员（演示）", "专职消防队与车间 ERT 已收到任务"],
+    ["acknowledged", "专职消防队（演示）", "任务已签收"],
+    ["arrived", "专职消防队（演示）", "已按推荐入口到达现场"],
+    ["first_report", "专职消防队（演示）", "火势受控，人员已撤离"],
+    ["incident_closed", "消控室值班员（演示）", "现场反馈已核验，事件归档"],
+  ].slice(0, closed ? 6 : hasReport ? 5 : stepIndex >= 4 ? 4 : 2).map(([event_type, actor, note], index) => ({
+    event_type, actor, note, occurred_at: `2026-08-26T10:${String(24 + index * 2).padStart(2, "0")}:00+08:00`,
+  }));
+  const dispatch = hasIncident ? {
+    id: "OFFLINE-DISPATCH-001", station_id: "crew-wx-01", station_name: "专职消防队·西区站（合成）", status: dispatchStatus,
+  } : null;
+  const incident = hasIncident ? {
+    id: "OFFLINE-INC-001", enterprise_id: "ent-001", enterprise_name: "电池车间（PACK/化成）", district: "西区",
+    status: incidentStatus, dispatch, timeline,
+    response_brief: {
+      address: "电池车间 2F · PACK 产线 A1",
+      items: [
+        { text: "重点危险源：锂电池模组半成品缓存区", sources: ["site-profile/hazards"] },
+        { text: "优先入口：车间南门，进入后沿东侧通道前往 A1", sources: ["site-profile/access-route"] },
+        { text: "可用设施：自动喷水系统、室内消火栓", sources: ["site-profile/facilities"] },
+      ],
+      disclaimer: "固定合成回放，不控制真实设备，不替代现场指挥。",
+    },
+    report: hasReport ? { situation: "明火已扑灭，人员全部撤离；持续监护复燃风险。", people_status: "no_risk" } : null,
+  } : null;
+  incidentBackend.status = "offline";
+  incidentBackend.signals = stepIndex < 3 ? [{ monitoring_event_id: "OFFLINE-001", enterprise_name: "电池车间（PACK/化成）", verification_status: "pending", occurred_at: "2026-08-26T10:24:00+08:00" }] : [];
+  incidentBackend.incidents = incident ? [incident] : [];
+  incidentBackend.stations = [{ id: "crew-wx-01", name: "专职消防队·西区站（合成）", district: "西区", status: closed ? "available" : "on_scene" }];
+  incidentBackend.station = incidentBackend.stations[0];
+  incidentBackend.tasks = incident ? [incident] : [];
+  incidentBackend.inbox = incident ? [{ inbox_id: "dispatch-OFFLINE-DISPATCH-001", source: "incident_dispatch", dispatch_id: dispatch.id, incident_id: incident.id, kind: "response", enterprise_name: incident.enterprise_name, summary: "电池车间 PACK 产线火警处置", status: dispatch.status }] : [];
+  selectedSignalEventId = stepIndex < 3 ? "OFFLINE-001" : null;
+  selectedIncidentId = incident?.id || null;
+  selectedInboxId = incident ? "dispatch-OFFLINE-DISPATCH-001" : null;
+  terminalStationId = "crew-wx-01";
+}
+
+function prepareJudgeTourStep(stepIndex) {
+  const step = JUDGE_TOUR_STEPS[stepIndex];
+  seedJudgeTourIncident(stepIndex);
+  monitoringState.spatialLevel = step.id === "alarm" ? "factory" : "workshop";
+  monitoringState.selectedId = monitoringState.events.find((event) => event.enterpriseId === "ent-001")?.id || monitoringState.selectedId;
+  monitoringState.floor = "2F";
+  copilotState.scenarios = [OFFLINE_JUDGE_SCENARIO];
+  copilotState.selectedId = OFFLINE_JUDGE_SCENARIO.scenario_id;
+  copilotState.offline = true;
+  copilotState.judgeMode = true;
+  copilotState.eventId = "OFFLINE-001";
+  copilotState.run = stepIndex >= 3 ? buildOfflineCopilotRun("dispatch") : stepIndex >= 1 ? buildOfflineCopilotRun("verification") : null;
+  copilotState.phase = stepIndex >= 6 ? "archived" : stepIndex >= 4 ? "crew_simulation" : stepIndex >= 3 ? "dispatch" : stepIndex >= 1 ? "verification" : "select";
+  copilotState.dispatch = stepIndex >= 3 ? "crew-wx-01" : null;
+  copilotState.verification = stepIndex >= 2 ? "confirmed" : null;
+  copilotState.judgeProgress = JUDGE_TOUR_STEPS.slice(0, stepIndex + 1).map((item) => item.title);
+}
+
+function renderJudgeTourController() {
+  const controller = document.querySelector("#judge-tour");
+  if (!controller) return;
+  controller.hidden = !judgeTour.active;
+  document.querySelector("[data-action='start-judge-tour']")?.toggleAttribute("hidden", judgeTour.active);
+  const actorSelect = document.querySelector("#demo-actor");
+  if (actorSelect) actorSelect.disabled = judgeTour.active;
+  if (!judgeTour.active) {
+    controller.innerHTML = "";
+    return;
+  }
+  const step = JUDGE_TOUR_STEPS[judgeTour.index];
+  const role = window.FireGuardEngine.roleDefinitions().find((item) => item.id === step.role);
+  controller.dataset.stepIndex = String(judgeTour.index);
+  controller.innerHTML = `
+    <div class="judge-tour-progress"><span style="width:${Math.round((judgeTour.index + 1) / JUDGE_TOUR_STEPS.length * 100)}%"></span></div>
+    <div class="judge-tour-step"><span>${String(judgeTour.index + 1).padStart(2, "0")} / ${String(JUDGE_TOUR_STEPS.length).padStart(2, "0")}</span><small>${judgeTour.paused ? "已暂停" : judgeTour.index === JUDGE_TOUR_STEPS.length - 1 ? "演示完成" : "自动播放中"}</small></div>
+    <div class="judge-tour-copy"><small>${escapeHtml(role?.label || step.role)}</small><h2>${escapeHtml(step.title)}</h2><p>${escapeHtml(step.detail)}</p><strong><i data-lucide="check-circle-2"></i>${escapeHtml(step.result)}</strong></div>
+    <div class="judge-tour-controls">
+      <button type="button" data-judge-tour-action="previous" aria-label="上一步" ${judgeTour.index === 0 ? "disabled" : ""}><i data-lucide="chevron-left"></i></button>
+      <button type="button" data-judge-tour-action="toggle"><i data-lucide="${judgeTour.paused ? "play" : "pause"}"></i>${judgeTour.paused ? "继续" : "暂停"}</button>
+      <button type="button" data-judge-tour-action="next" aria-label="下一步" ${judgeTour.index === JUDGE_TOUR_STEPS.length - 1 ? "disabled" : ""}><i data-lucide="chevron-right"></i></button>
+      <button type="button" data-judge-tour-action="exit">退出演示</button>
+    </div>`;
+  refreshIcons();
+}
+
+function scheduleJudgeTourStep() {
+  clearTimeout(judgeTour.timer);
+  if (!judgeTour.active || judgeTour.paused || judgeTour.index >= JUDGE_TOUR_STEPS.length - 1) return;
+  judgeTour.timer = setTimeout(() => setJudgeTourStep(judgeTour.index + 1), JUDGE_TOUR_DELAY);
+}
+
+function setJudgeTourStep(index) {
+  if (!judgeTour.active || index < 0 || index >= JUDGE_TOUR_STEPS.length) return;
+  clearTimeout(judgeTour.timer);
+  judgeTour.index = index;
+  const step = JUDGE_TOUR_STEPS[index];
+  setActiveRole(step.role);
+  prepareJudgeTourStep(index);
+  if (location.hash === step.route) renderRoute();
+  else location.hash = step.route;
+  renderJudgeTourController();
+  scheduleJudgeTourStep();
+}
+
+function startJudgeTour() {
+  if (judgeTour.active) return;
+  judgeTour = {
+    active: true, paused: false, index: 0, timer: null,
+    restore: {
+      role: activeRoleId, hash: location.hash || "#/home",
+      incident: structuredClone(incidentBackend), copilot: structuredClone(copilotState), monitoring: structuredClone(monitoringState),
+    },
+  };
+  stopIncidentBackend();
+  stopMonitoringBackend();
+  setJudgeTourStep(0);
+}
+
+function stopJudgeTour() {
+  if (!judgeTour.active) return;
+  clearTimeout(judgeTour.timer);
+  const restore = judgeTour.restore;
+  judgeTour = { active: false, paused: false, index: 0, timer: null, restore: null };
+  incidentBackend = restore.incident;
+  copilotState = restore.copilot;
+  monitoringState = restore.monitoring;
+  setActiveRole(restore.role);
+  renderJudgeTourController();
+  if (location.hash === restore.hash) renderRoute();
+  else location.hash = restore.hash;
+}
+
+function bindJudgeTourControls() {
+  document.querySelector("#judge-tour")?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-judge-tour-action]")?.dataset.judgeTourAction;
+    if (!action) return;
+    if (action === "exit") return stopJudgeTour();
+    if (action === "previous") return setJudgeTourStep(judgeTour.index - 1);
+    if (action === "next") return setJudgeTourStep(judgeTour.index + 1);
+    judgeTour.paused = !judgeTour.paused;
+    renderJudgeTourController();
+    scheduleJudgeTourStep();
+  });
 }
 
 window.addEventListener("fireguard:enterprise-selected", (event) => {
@@ -2973,5 +3146,6 @@ window.addEventListener("DOMContentLoaded", () => {
   runSelfCheck();
   bindHeaderActions();
   bindDialogs();
+  bindJudgeTourControls();
   renderRoute();
 });

@@ -27,6 +27,34 @@ async function main() {
   assert.equal(await page.locator("[data-workspace-link]").count(), 4);
   await page.screenshot({ path: path.join(__dirname, "../workspaces-1440x1024.png") });
 
+  await page.getByRole("button", { name: "评委模式" }).click();
+  const judgeTour = page.locator("#judge-tour");
+  await assertVisible(judgeTour.getByRole("heading", { name: "报警接入与定位" }));
+  assert.match(page.url(), /#\/monitoring$/);
+  await page.locator('#judge-tour[data-step-index="1"]').waitFor({ state: "visible", timeout: 5000 });
+  await assertVisible(judgeTour.getByRole("heading", { name: "AI 研判与证据补全" }));
+  assert.match(page.url(), /#\/copilot$/);
+  await judgeTour.getByRole("button", { name: "暂停" }).click();
+  await judgeTour.getByRole("button", { name: "下一步" }).click();
+  await assertVisible(judgeTour.getByRole("heading", { name: "巡查人员现场核实" }));
+  assert.match(page.url(), /#\/monitoring$/);
+  assert.equal(await page.locator("#demo-actor").inputValue(), "fire_patrol");
+  for (const [title, route, role] of [
+    ["消控室升级并调派", /#\/copilot$/, "control_room_operator"],
+    ["消防队签收并到场", /#\/station\?crew_id=crew-wx-01$/, "full_time_fire_brigade"],
+    ["现场反馈与人工归档", /#\/incidents$/, "control_room_operator"],
+    ["流程闭环与出警报告", /#\/workflow$/, "control_room_operator"],
+    ["管理层复盘", /#\/analysis\/ent-001$/, "company_management"],
+  ]) {
+    await judgeTour.getByRole("button", { name: "下一步" }).click();
+    await assertVisible(judgeTour.getByRole("heading", { name: title }));
+    assert.match(page.url(), route);
+    assert.equal(await page.locator("#demo-actor").inputValue(), role);
+  }
+  assert.equal(await judgeTour.getByRole("button", { name: "下一步" }).isDisabled(), true);
+  await judgeTour.getByRole("button", { name: "退出演示" }).click();
+  await assertVisible(page.getByRole("heading", { name: "消控室值班员工作台" }));
+
   await page.locator("#demo-actor").selectOption("maintenance_contractor");
   await assertVisible(page.getByRole("heading", { name: "消防维保单位工作台" }));
   assert.deepEqual(await page.locator(".primary-nav a:not([hidden])").allTextContents(), ["首页", "设施运维"]);
@@ -114,6 +142,12 @@ async function main() {
   await page.waitForLoadState("domcontentloaded");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await assertVisible(page.locator(".company-rail"));
+  await page.goto(APP_URL);
+  await page.getByRole("button", { name: "评委模式" }).click();
+  await page.locator("#judge-tour").getByRole("button", { name: "暂停" }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await assertVisible(page.locator("#judge-tour").getByRole("heading", { name: "报警接入与定位" }));
+  await page.locator("#judge-tour").getByRole("button", { name: "退出演示" }).click();
   } finally {
   await browser.close();
   }

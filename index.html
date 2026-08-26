@@ -6,7 +6,7 @@
     <meta name="description" content="FireOps AI 工厂消防设备运维 Agent 平台" />
     <title>FireOps AI｜工厂消防设备运维 Agent</title>
     <link rel="icon" href="assets/fireops-logo.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=2.6" />
+    <link rel="stylesheet" href="styles.css?v=2.7" />
     <script type="importmap">
       {
         "imports": {
@@ -35,6 +35,7 @@
       </nav>
 
       <div class="header-meta">
+        <button class="judge-tour-launch" type="button" data-action="start-judge-tour"><i data-lucide="play"></i>评委模式</button>
         <button class="header-import" type="button" data-action="import-data" hidden><i data-lucide="file-up"></i>数据导入</button>
         <label class="account" for="demo-actor"><i data-lucide="circle-user-round"></i><span class="sr-only">当前演示角色</span><select id="demo-actor" aria-label="切换演示角色"><option value="company_management">公司管理层</option><option value="control_room_operator">消控室值班员</option><option value="fire_patrol">防火巡查人员</option><option value="full_time_fire_brigade">专职消防队</option><option value="workshop_ert">车间 ERT</option><option value="facility_department">消防设施部门</option><option value="maintenance_contractor">消防维保单位</option><option value="workshop_liaison">车间问题对接人</option></select><i data-lucide="shield-check"></i></label>
       </div>
@@ -43,6 +44,8 @@
     <main id="main-content" tabindex="-1">
       <div id="app"></div>
     </main>
+
+    <aside id="judge-tour" class="judge-tour" aria-live="polite" hidden></aside>
 
     <nav class="mobile-nav" aria-label="手机端主要导航">
       <a href="#/home" data-mobile-nav="home" data-module="home"><i data-lucide="layout-grid"></i><span>首页</span></a>
@@ -115,7 +118,7 @@
 
     <script src="assets/lucide.min.js"></script>
     <script src="engine.cjs?v=1.2"></script>
-    <script src="app.js?v=3.4"></script>
+    <script src="app.js?v=3.5"></script>
     <script type="module" src="monitoring-3d.js?v=1.5"></script>
   </body>
 </html>
