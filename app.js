@@ -155,12 +155,107 @@ window.FireOpsReview = {
   setMonitoringEvents(events) {
     monitoringState.events = events;
     monitoringState.selectedId = events[0]?.id || null;
-    if (monitoringState.spatialLevel === "workshop" && events[0]?.enterpriseId !== "ent-001") monitoringState.spatialLevel = "factory";
+    if (monitoringState.spatialLevel === "workshop" && !buildingForEnterprise(events[0]?.enterpriseId)) monitoringState.spatialLevel = "factory";
     renderRoute();
   },
 };
 let toastTimer;
 let workflowStarted = false;
+let spatialSite = null;
+let legacyMap = null;
+function loadSemifinalSpatial() {
+  Promise.all([
+    fetch("demo-data/semifinal/site_spatial.json").then((response) => response.json()),
+    fetch("demo-data/semifinal/legacy_map.json").then((response) => response.json()),
+  ]).then(([site, map]) => {
+    spatialSite = site;
+    legacyMap = map;
+    if ((location.hash || "").startsWith("#/monitoring")) renderRoute();
+  }).catch(() => {});
+}
+function buildingForEnterprise(enterpriseId) {
+  const buildingId = legacyMap?.enterprises?.[enterpriseId]?.building_id;
+  return spatialSite?.buildings.find((item) => item.id === buildingId) || null;
+}
+function floorShort(label) {
+  return String(label || "").split(" ")[0];
+}
+function eventPlanPosition(building, event) {
+  const rules = legacyMap?.location_rules?.[event.enterpriseId] || [];
+  const text = `${event.point} ${event.location}`;
+  for (const rule of rules) {
+    if (!text.includes(rule.match)) continue;
+    if (rule.zone) {
+      for (const floor of building.floors || []) {
+        const zone = (floor.zones || []).find((item) => item.id === rule.zone);
+        if (zone) return { x: zone.coords.x + zone.coords.w / 2, y: 100 - zone.coords.y - zone.coords.h / 2, floor: floorShort(floor.label), zoneId: zone.id };
+      }
+    }
+    if (rule.door) {
+      const node = (building.route_nodes || []).find((item) => item.id === (building.exterior_doors || []).find((door) => door.id === rule.door)?.node);
+      if (node) return { x: node.x, y: 100 - node.y, floor: floorShort((building.floors.find((floor) => floor.id === node.floor) || {}).label || "1F"), zoneId: null };
+    }
+  }
+  return { x: event.left, y: event.top, floor: event.floor, zoneId: null };
+}
+const ZONE_FILLS = { process: "#eef1fb", storage: "#fdf3e3", buffer: "#e9f6ef", hazard_room: "#fdecec", office: "#f2f2f4", electrical: "#f3eefc", logistics: "#e7f4f4" };
+function workshopPlanTemplate(building, buildingEvents, selectedEvent, pendingFire) {
+  const shownFloors = monitoringState.floor === "all" ? building.floors : building.floors.filter((floor) => floorShort(floor.label) === monitoringState.floor);
+  const floors = shownFloors.length ? shownFloors : building.floors.slice(0, 1);
+  const rows = floors.length;
+  const selectedPos = eventPlanPosition(building, selectedEvent);
+  const nodeById = new Map((building.route_nodes || []).map((node) => [node.id, node]));
+  const deviceColor = { smoke: "#d64545", temperature: "#e6862e", gas: "#8a5cf6", hydrant: "#2f7fd6" };
+  const svgFloors = floors.map((floor, index) => {
+    const offset = index * 100;
+    const floorId = floor.id;
+    const zones = (floor.zones || []).map((zone) => {
+      const c = zone.coords;
+      const alarm = zone.id === selectedPos.zoneId;
+      return `<g><rect x="${c.x}" y="${offset + 100 - c.y - c.h}" width="${c.w}" height="${c.h}" rx="1.2" class="${alarm ? "zone-alarm" : ""}" fill="${ZONE_FILLS[zone.kind] || "#f4f4f6"}" stroke="#c9c4d4" stroke-width="0.35"></rect><text x="${c.x + c.w / 2}" y="${offset + 100 - c.y - c.h / 2}" text-anchor="middle" font-size="3" fill="#4b4656">${escapeHtml(zone.name)}</text></g>`;
+    }).join("");
+    const edges = (building.route_edges || []).filter((edge) => {
+      const from = nodeById.get(edge.from);
+      const to = nodeById.get(edge.to);
+      return from && to && from.floor === floorId && to.floor === floorId;
+    }).map((edge) => {
+      const from = nodeById.get(edge.from);
+      const to = nodeById.get(edge.to);
+      return `<line x1="${from.x}" y1="${offset + 100 - from.y}" x2="${to.x}" y2="${offset + 100 - to.y}" stroke="#b7b3c2" stroke-width="0.35" stroke-dasharray="1.6 1.2"></line>`;
+    }).join("");
+    const doors = (building.route_nodes || []).filter((node) => node.floor === floorId && node.kind === "exterior_door").map((node) =>
+      `<g><rect x="${node.x - 1.6}" y="${offset + 100 - node.y - 0.9}" width="3.2" height="1.8" rx="0.3" fill="#1f9d55"></rect><text x="${node.x}" y="${offset + 100 - node.y - 1.6}" text-anchor="middle" font-size="2" fill="#1f7a44">${escapeHtml(node.name)}</text></g>`).join("");
+    const interiorDoors = (building.route_nodes || []).filter((node) => node.floor === floorId && node.kind === "interior_door").map((node) =>
+      `<rect x="${node.x - 1}" y="${offset + 100 - node.y - 0.6}" width="2" height="1.2" rx="0.3" fill="#7c5cd6"><title>${escapeHtml(node.name)}</title></rect>`).join("");
+    const stairs = (building.route_nodes || []).filter((node) => node.floor === floorId && node.kind === "stair").map((node) =>
+      `<g><rect x="${node.x - 1.4}" y="${offset + 100 - node.y - 1.4}" width="2.8" height="2.8" rx="0.4" fill="#eceaf3" stroke="#8f89a3" stroke-width="0.25"></rect><text x="${node.x}" y="${offset + 100 - node.y + 0.9}" text-anchor="middle" font-size="2.2" fill="#5d5770">梯</text></g>`).join("");
+    const points = (building.device_points || []).filter((point) => point.floor === floorId).map((point) =>
+      `<circle cx="${point.x}" cy="${offset + 100 - point.y}" r="0.9" fill="${deviceColor[point.type] || "#666"}"><title>${escapeHtml(point.name)}</title></circle>`).join("");
+    return `<g>${edges}${zones}${doors}${interiorDoors}${stairs}${points}<text x="2" y="${offset + 5}" font-size="3.2" font-weight="700" fill="#36313a">${escapeHtml(floor.label)}</text></g>`;
+  }).join("");
+  const pinFor = (event) => {
+    const pos = eventPlanPosition(building, event);
+    const floorIndex = floors.findIndex((floor) => floorShort(floor.label) === pos.floor);
+    if (floorIndex < 0) return "";
+    const top = (floorIndex * 100 + pos.y) / rows;
+    return `<button type="button" class="monitoring-event-pin ${event.id === selectedEvent.id ? "active" : ""}" style="--pin-left:${pos.x}%;--pin-top:${top}%" data-monitoring-event-pin="${event.id}" aria-label="${escapeHtml(event.point)} ${escapeHtml(event.typeLabel)}"><i data-lucide="${event.type === "fire" ? "flame" : "circle-alert"}"></i></button>`;
+  };
+  const pins = buildingEvents.map(pinFor).join("");
+  const selectedFloorIndex = floors.findIndex((floor) => floorShort(floor.label) === selectedPos.floor);
+  const alarmPin = selectedFloorIndex >= 0
+    ? (pendingFire
+      ? `<button type="button" class="monitoring-alarm-pin" style="--alarm-left:${selectedPos.x}%;--alarm-top:${(selectedFloorIndex * 100 + selectedPos.y) / rows}%" data-action="open-monitoring-copilot"><i data-lucide="flame"></i><span><strong>${escapeHtml(selectedEvent.point)}</strong><small>${escapeHtml(selectedEvent.time)} ${escapeHtml(selectedEvent.typeLabel)}</small></span></button>`
+      : `<div class="monitoring-alarm-pin" style="--alarm-left:${selectedPos.x}%;--alarm-top:${(selectedFloorIndex * 100 + selectedPos.y) / rows}%"><i data-lucide="${selectedEvent.type === "fault" ? "wrench" : "circle-alert"}"></i><span><strong>${escapeHtml(selectedEvent.point)}</strong><small>${escapeHtml(selectedEvent.time)} ${escapeHtml(selectedEvent.statusLabel)}</small></span></div>`)
+    : "";
+  return `
+    <div class="monitoring-floor-summary"><strong>${escapeHtml(building.name)} · ${monitoringState.floor === "all" ? "全部楼层" : escapeHtml(monitoringState.floor)} · ${buildingEvents.length} 个事件点</strong><span>${escapeHtml(building.layout_profile)} · 合成空间数据</span></div>
+    <div class="monitoring-floorplan">
+      <div class="monitoring-floor-selector" aria-label="楼层筛选">${[["all", "全部楼层"], ...building.floors.map((floor) => [floorShort(floor.label), floorShort(floor.label)])].map(([value, label]) => `<button type="button" data-monitoring-floor="${value}" aria-pressed="${monitoringState.floor === value}" class="${monitoringState.floor === value ? "active" : ""}">${label}</button>`).join("")}</div>
+      <svg class="monitoring-svg-plan" viewBox="0 0 100 ${100 * rows}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(building.name)}消防平面图">${svgFloors}</svg>
+      ${pins}
+      ${alarmPin}
+    </div>`;
+}
 const MONITORING_API_BASE = window.FIREGUARD_API_BASE || "http://127.0.0.1:8000";
 const OFFLINE_JUDGE_SCENARIO = {
   scenario_id: "B-confirmed-fire-battery-workorder",
@@ -1294,6 +1389,8 @@ function monitoringTemplate() {
     pending: monitoringState.events.filter((event) => event.status === "pending").length,
     processing: monitoringState.events.filter((event) => event.status === "processing").length,
   };
+  const building = buildingForEnterprise(company.id);
+  const buildingEvents = building ? events.filter((event) => event.enterpriseId === company.id) : [];
   const floorEvents = events.filter((event) => event.enterpriseId === "ent-001" && (monitoringState.floor === "all" || event.floor === monitoringState.floor));
   const floorDevices = new Set(floorEvents.flatMap((event) => event.devices));
   const selectedOnFloor = floorEvents.some((event) => event.id === selectedEvent.id);
@@ -1308,6 +1405,7 @@ function monitoringTemplate() {
   ` : `
     <section class="monitoring-location-panel" data-monitoring-panel="location">
       <div class="monitoring-checks"><strong>FireOps 已检查</strong><span><i data-lucide="check"></i>信号稳定性</span><span><i data-lucide="check"></i>相邻探测器</span><span><i data-lucide="check"></i>联动设备</span><span><i data-lucide="check"></i>设备状态</span></div>
+      ${building ? workshopPlanTemplate(building, buildingEvents, selectedEvent, pendingFire) : `
       <div class="monitoring-floor-summary"><strong>电池车间 · ${monitoringState.floor === "all" ? "全部楼层" : monitoringState.floor} · ${floorEvents.length} 个事件点</strong><span>${floorDevices.size} 台关联设备</span></div>
       <div class="monitoring-floorplan" style="--alarm-left:${selectedEvent.left}%;--alarm-top:${selectedEvent.top}%">
         <div class="monitoring-floor-selector" aria-label="楼层筛选">${[["all","全部楼层"],["3F","3F"],["2F","2F"],["1F","1F"]].map(([value,label]) => `<button type="button" data-monitoring-floor="${value}" aria-pressed="${monitoringState.floor === value}" class="${monitoringState.floor === value ? "active" : ""}">${label}</button>`).join("")}</div>
@@ -1317,13 +1415,20 @@ function monitoringTemplate() {
         ${selectedOnFloor ? pendingFire
           ? `<button type="button" class="monitoring-alarm-pin" data-action="open-monitoring-copilot"><i data-lucide="flame"></i><span><strong>${escapeHtml(selectedEvent.point)}</strong><small>${escapeHtml(selectedEvent.time)} ${escapeHtml(selectedEvent.typeLabel)}</small></span></button>`
           : `<div class="monitoring-alarm-pin"><i data-lucide="${selectedEvent.type === "fault" ? "wrench" : "circle-alert"}"></i><span><strong>${escapeHtml(selectedEvent.point)}</strong><small>${escapeHtml(selectedEvent.time)} ${escapeHtml(selectedEvent.statusLabel)}</small></span></div>` : ""}
-      </div>
+      </div>`}
     </section>`;
+  const enterWorkshopButtons = spatialSite && legacyMap
+    ? spatialSite.buildings.map((item) => {
+      const enterpriseId = Object.keys(legacyMap.enterprises).find((key) => legacyMap.enterprises[key].building_id === item.id);
+      const firstEvent = events.find((event) => event.enterpriseId === enterpriseId);
+      return `<button type="button" class="factory-enter-workshop" data-enter-workshop="${enterpriseId}"><i data-lucide="factory"></i><span><strong>${escapeHtml(item.name)}</strong><small>${firstEvent ? `${escapeHtml(firstEvent.floor)} · ${escapeHtml(firstEvent.point)} · ${escapeHtml(firstEvent.statusLabel)}` : "暂无待处理事件"}</small></span><b>进入车间</b></button>`;
+    }).join("")
+    : `<div class="twin-loading"><span></span>正在加载车间空间数据</div>`;
   const factoryPanel = `
     <div id="monitoring-3d" class="twin-viewport factory-overview" data-spatial-level="factory" data-selected-company="${company.id}" data-risk-levels="${companies.map((item) => `${item.id}:${item.level}`).join(",")}" role="region" aria-label="星澜新能源汽车工厂三维总览">
       <div class="twin-loading"><span></span>正在加载厂区建筑模型</div>
-      <div class="factory-overview-copy"><span>FACTORY DIGITAL TWIN</span><strong>星澜新能源汽车工厂</strong><small>点击厂区风险点，或从电池车间进入消防平面</small></div>
-      <button type="button" class="factory-enter-workshop" data-enter-workshop="ent-001"><i data-lucide="factory"></i><span><strong>电池车间</strong><small>PACK / 化成 · 2F 火警待核实</small></span><b>进入电池车间</b></button>
+      <div class="factory-overview-copy"><span>FACTORY DIGITAL TWIN</span><strong>星澜新能源汽车工厂</strong><small>点击厂区风险点，或选择车间进入消防平面</small></div>
+      <div class="factory-enter-list">${enterWorkshopButtons}</div>
     </div>`;
   return `
     <section class="monitoring-page" aria-labelledby="monitoring-title">
@@ -1341,7 +1446,7 @@ function monitoringTemplate() {
             <div><span>${escapeHtml(selectedEvent.typeLabel)} · ${escapeHtml(selectedEvent.statusLabel)}</span><h1 id="monitoring-title">${escapeHtml(company.name.replace(/（.*?）/g, ""))} ${escapeHtml(selectedEvent.location)}</h1><dl><div><dt>事件时间</dt><dd>${escapeHtml(selectedEvent.time)}</dd></div><div><dt>探测点</dt><dd>${escapeHtml(selectedEvent.point)}</dd></div><div><dt>位置</dt><dd>${escapeHtml(selectedEvent.floor)} / ${escapeHtml(profile.district)} / ${escapeHtml(selectedEvent.location)}</dd></div><div><dt>消防指数</dt><dd>${scoreText(company.score)} / 100</dd></div></dl></div>
             <div class="twin-actions"><button type="button" data-action="inject-demo-event"><i data-lucide="radio-tower"></i>模拟火警帧</button><button type="button" data-action="inject-demo-fault"><i data-lucide="wrench"></i>模拟故障</button></div>
           </header>
-          ${monitoringState.spatialLevel === "workshop" ? `<div class="monitoring-workshop-nav"><button type="button" data-return-factory><i data-lucide="arrow-left"></i>返回工厂总览</button><span>工厂总览 / 电池车间 / ${escapeHtml(selectedEvent.floor)}</span></div><nav class="monitoring-view-tabs" role="tablist" aria-label="事件视图">${Object.entries(tabLabels).map(([value,label]) => `<button type="button" role="tab" data-monitoring-tab="${value}" aria-selected="${monitoringState.tab === value}" class="${monitoringState.tab === value ? "active" : ""}">${label}</button>`).join("")}</nav><div class="twin-viewport" data-spatial-level="workshop" data-selected-company="${company.id}" role="region" aria-label="电池车间消防空间视图">${panel}</div>` : factoryPanel}
+          ${monitoringState.spatialLevel === "workshop" ? `<div class="monitoring-workshop-nav"><button type="button" data-return-factory><i data-lucide="arrow-left"></i>返回工厂总览</button><span>工厂总览 / ${escapeHtml(building?.name || "电池车间")} / ${escapeHtml(selectedEvent.floor)}</span></div><nav class="monitoring-view-tabs" role="tablist" aria-label="事件视图">${Object.entries(tabLabels).map(([value,label]) => `<button type="button" role="tab" data-monitoring-tab="${value}" aria-selected="${monitoringState.tab === value}" class="${monitoringState.tab === value ? "active" : ""}">${label}</button>`).join("")}</nav><div class="twin-viewport" data-spatial-level="workshop" data-selected-company="${company.id}" role="region" aria-label="${escapeHtml(building?.name || "电池车间")}消防空间视图">${panel}</div>` : factoryPanel}
         </section>
         <aside class="monitoring-detail" aria-labelledby="monitoring-detail-title">
           <div class="detail-eyebrow"><h2 id="monitoring-detail-title">证据摘要</h2><strong>5/5</strong></div>
@@ -1650,10 +1755,12 @@ function renderThreeDFallback(host) {
 
 function bindSpatialActions() {
   app.querySelectorAll("[data-enter-workshop]").forEach((button) => button.addEventListener("click", () => {
-    if (button.dataset.enterWorkshop !== "ent-001") return showToast("本阶段开放电池车间，其余工艺车间将在下一阶段补齐");
-    selectedCompanyId = "ent-001";
-    monitoringState.selectedId = monitoringState.events.find((event) => event.enterpriseId === "ent-001")?.id || monitoringState.selectedId;
-    monitoringState.floor = "2F";
+    const enterpriseId = button.dataset.enterWorkshop;
+    if (!buildingForEnterprise(enterpriseId)) return showToast("车间空间数据尚未加载完成，请稍后再试");
+    selectedCompanyId = enterpriseId;
+    const firstEvent = monitoringState.events.find((event) => event.enterpriseId === enterpriseId);
+    if (firstEvent) monitoringState.selectedId = firstEvent.id;
+    monitoringState.floor = firstEvent?.floor || "all";
     monitoringState.spatialLevel = "workshop";
     renderRoute();
   }));
@@ -1720,7 +1827,7 @@ function bindDynamicActions() {
       monitoringState.floor = visible[0].floor;
     }
     const selected = monitoringState.events.find((event) => event.id === monitoringState.selectedId);
-    if (monitoringState.spatialLevel === "workshop" && selected?.enterpriseId !== "ent-001") monitoringState.spatialLevel = "factory";
+    if (monitoringState.spatialLevel === "workshop" && !buildingForEnterprise(selected?.enterpriseId)) monitoringState.spatialLevel = "factory";
     renderRoute();
   }));
   app.querySelectorAll("[data-monitoring-event], [data-monitoring-event-pin]").forEach((button) => button.addEventListener("click", () => {
@@ -1729,7 +1836,7 @@ function bindDynamicActions() {
     if (event) {
       selectedCompanyId = event.enterpriseId;
       monitoringState.floor = event.floor;
-      if (monitoringState.spatialLevel === "workshop" && event.enterpriseId !== "ent-001") monitoringState.spatialLevel = "factory";
+      if (monitoringState.spatialLevel === "workshop" && !buildingForEnterprise(event.enterpriseId)) monitoringState.spatialLevel = "factory";
     }
     renderRoute();
   }));
@@ -3292,5 +3399,6 @@ window.addEventListener("DOMContentLoaded", () => {
   bindHeaderActions();
   bindDialogs();
   bindJudgeTourControls();
+  loadSemifinalSpatial();
   renderRoute();
 });

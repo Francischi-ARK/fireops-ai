@@ -12,6 +12,8 @@
   },
   "location_rules": {
     "ent-001": [
+      { "match": "测试工位", "zone": "z-module-cache", "floor": "f2" },
+      { "match": "缓存区", "zone": "z-module-cache", "floor": "f2" },
       { "match": "电池测试间", "zone": "z-cell-test", "floor": "f2" },
       { "match": "PACK", "zone": "z-pack-a1", "floor": "f1" },
       { "match": "化成区", "zone": "z-formation", "floor": "f1" },
