@@ -77,18 +77,39 @@ function main() {
   for (const n of spatial.site.route_nodes || []) { noteId(FILES.spatial, n.id); addSpatial(n.id); }
   const buildings = spatial.buildings || [];
   const workshopIds = new Set();
+  const buildingScopedOwner = new Map();
   for (const b of buildings) {
     noteId(FILES.spatial, b.id); addSpatial(b.id);
     workshopIds.add(b.workshop_id);
     for (const floor of b.floors || []) {
-      for (const z of floor.zones || []) { noteId(FILES.spatial, z.id); addSpatial(z.id); }
+      for (const z of floor.zones || []) { noteId(FILES.spatial, z.id); addSpatial(z.id); buildingScopedOwner.set(z.id, b.id); }
     }
     for (const d of b.exterior_doors || []) { noteId(FILES.spatial, d.id); addSpatial(d.id); }
+    for (const d of b.interior_doors || []) { noteId(FILES.spatial, d.id); addSpatial(d.id); buildingScopedOwner.set(d.id, b.id); }
     for (const s of b.stairs || []) { noteId(FILES.spatial, s.id); addSpatial(s.id); }
     for (const n of b.route_nodes || []) { noteId(FILES.spatial, n.id); addSpatial(n.id); }
-    for (const p of b.device_points || []) { noteId(FILES.spatial, p.id); addSpatial(p.id); }
-    for (const h of b.hazards || []) { noteId(FILES.spatial, h.id); addSpatial(h.id); }
-    for (const r of b.fire_resources || []) { noteId(FILES.spatial, r.id); addSpatial(r.id); }
+    for (const p of b.device_points || []) { noteId(FILES.spatial, p.id); addSpatial(p.id); buildingScopedOwner.set(p.id, b.id); }
+    for (const h of b.hazards || []) { noteId(FILES.spatial, h.id); addSpatial(h.id); buildingScopedOwner.set(h.id, b.id); }
+    for (const r of b.fire_resources || []) { noteId(FILES.spatial, r.id); addSpatial(r.id); buildingScopedOwner.set(r.id, b.id); }
+  }
+  // 五类建筑齐全
+  const EXPECTED_BUILDINGS = ["b-battery", "b-painting", "b-assembly", "b-stamping", "b-warehouse"];
+  for (const id of EXPECTED_BUILDINGS) {
+    if (!buildings.some((b) => b.id === id)) fail(FILES.spatial, "buildings", "缺少建筑 " + id);
+  }
+  // 路线边端点必须存在（含厂区到建筑外门的跨层引用）
+  const allEdges = [...(spatial.site.route_edges || []), ...buildings.flatMap((b) => b.route_edges || [])];
+  for (const e of allEdges) {
+    for (const endpoint of [e.from, e.to]) {
+      if (!spatialIds.has(endpoint)) fail(FILES.spatial, e.from + ">" + e.to, "路线边引用不存在的节点 " + endpoint);
+    }
+  }
+  // 室内门必须指向已存在的路线节点
+  for (const b of buildings) {
+    for (const d of b.interior_doors || []) {
+      if (!spatialIds.has(d.node)) fail(FILES.spatial, d.id, "室内门指向不存在的节点 " + d.node);
+      if (d.zone && !spatialIds.has(d.zone)) fail(FILES.spatial, d.id, "室内门指向不存在的工艺区 " + d.zone);
+    }
   }
   // 坐标规则 0-100
   const allNodes = [...(spatial.site.route_nodes || []), ...buildings.flatMap((b) => b.route_nodes || [])];
@@ -127,6 +148,18 @@ function main() {
     (b.floors || []).some((f) => (f.zones || []).some((z) => z.name.includes("原料")))
   );
   if (rawBuildings.length > 1) fail(FILES.spatial, "buildings", "原料仓区出现在多个建筑: " + rawBuildings.map((b) => b.id).join(","));
+  // 检查 7 补充：路线拓扑不得复制（按节点类型归一化比较）
+  const nodeKind = new Map();
+  for (const b of buildings) for (const n of b.route_nodes || []) nodeKind.set(n.id, n.kind);
+  const topoSigs = new Map();
+  for (const b of buildings) {
+    const sig = (b.route_edges || [])
+      .map((e) => (nodeKind.get(e.from) || "?") + ">" + (nodeKind.get(e.to) || "?"))
+      .sort()
+      .join("|");
+    if (topoSigs.has(sig)) fail(FILES.spatial, b.id, "路线拓扑与 " + topoSigs.get(sig) + " 重复");
+    topoSigs.set(sig, b.id);
+  }
   // 场景校验
   const BANNED_ACTIONS = ["auto_call_119", "auto_start_suppression", "auto_operate_device", "ai_confirm_fire"];
   const ALLOWED_TRANSITIONS = new Set([
@@ -167,12 +200,19 @@ function main() {
       const key = s.from_state + ">" + s.to_state;
       if (!ALLOWED_TRANSITIONS.has(key)) fail(rel, s.step_id, "非法状态迁移 " + key);
       // 跨文件实体引用存在（合成证据引用含 "/"，跳过）
+      const stepBuildings = new Set();
       for (const ref of s.entity_refs || []) {
         if (String(ref).includes("/")) continue;
         if (ref === "site-xinglan") continue;
         if (spatialIds.has(ref) || workshopIds.has(ref)) continue;
         fail(rel, s.step_id + ".entity_refs", "引用不存在的实体 " + ref);
       }
+      // 同一步骤的建筑级实体不得跨车间串用
+      for (const ref of s.entity_refs || []) {
+        const owner = buildingScopedOwner.get(ref);
+        if (owner) stepBuildings.add(owner);
+      }
+      if (stepBuildings.size > 1) fail(rel, s.step_id + ".entity_refs", "同一步骤引用多个车间的实体: " + [...stepBuildings].join(","));
       // 未授权关闭
       if (s.action === "close_workorder" && s.actor_role !== "facility_department")
         fail(rel, s.step_id, "工单关闭只能由 facility_department 执行");

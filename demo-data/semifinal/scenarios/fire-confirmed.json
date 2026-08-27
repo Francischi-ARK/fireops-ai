@@ -95,6 +95,32 @@
       "evidence_refs": ["dispatch/FIRE-001-ert"],
       "human_gate": true,
       "display_title": "通知电池车间 ERT 增援",
+      "next_step_id": "fc-07b"
+    },
+    {
+      "step_id": "fc-07b",
+      "actor_role": "workshop_ert",
+      "route": "#/my-tasks",
+      "action": "acknowledge_ert_task",
+      "from_state": "issued",
+      "to_state": "issued",
+      "entity_refs": ["ws-battery", "b-battery"],
+      "evidence_refs": ["dispatch/FIRE-001-ert"],
+      "human_gate": true,
+      "display_title": "电池车间 ERT 签收增援任务",
+      "next_step_id": "fc-07c"
+    },
+    {
+      "step_id": "fc-07c",
+      "actor_role": "workshop_ert",
+      "route": "#/my-tasks",
+      "action": "report_ert_status",
+      "from_state": "issued",
+      "to_state": "issued",
+      "entity_refs": ["d-battery-east", "z-module-cache"],
+      "evidence_refs": ["ert_report/FIRE-001-ready"],
+      "human_gate": true,
+      "display_title": "ERT 到场待命：组织疏散并准备初期处置",
       "next_step_id": "fc-08"
     },
     {
@@ -147,6 +173,19 @@
       "evidence_refs": ["brigade_report/FIRE-001-first"],
       "human_gate": true,
       "display_title": "首次现场反馈：火势局限于缓存区",
+      "next_step_id": "fc-11b"
+    },
+    {
+      "step_id": "fc-11b",
+      "actor_role": "workshop_ert",
+      "route": "#/my-tasks",
+      "action": "assist_suppression",
+      "from_state": "first_report",
+      "to_state": "first_report",
+      "entity_refs": ["z-module-cache", "fr-bat-02"],
+      "evidence_refs": ["ert_report/FIRE-001-assist"],
+      "human_gate": true,
+      "display_title": "ERT 协同专职队处置（熟悉工艺与断电点位）",
       "next_step_id": "fc-12"
     },
     {
@@ -156,7 +195,7 @@
       "action": "authorize_device_operation",
       "from_state": "first_report",
       "to_state": "first_report",
-      "entity_refs": ["fr-bat-02", "fr-pt-01"],
+      "entity_refs": ["fr-bat-01", "fr-bat-02"],
       "evidence_refs": ["command/FIRE-001-device-auth"],
       "human_gate": true,
       "display_title": "经总指挥授权，值班员在消控室确认设施操作",
