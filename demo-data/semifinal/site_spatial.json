@@ -1,0 +1,357 @@
+{
+  "schema": "fireops-semifinal/site-spatial/v1",
+  "is_simulation": true,
+  "external_system": "none",
+  "site": {
+    "id": "site-xinglan",
+    "name": "星澜新能源汽车工厂（合成）",
+    "hierarchy": ["site", "building", "floor", "zone", "device_point"],
+    "coordinate_rule": "归一化 0-100，原点在图纸左下角，x 向右，y 向上",
+    "gates": [
+      { "id": "gate-south", "name": "厂区南门", "node": "sn-gate-south" },
+      { "id": "gate-east", "name": "厂区东门", "node": "sn-gate-east" }
+    ],
+    "route_nodes": [
+      { "id": "sn-gate-south", "kind": "gate", "name": "南门", "x": 50, "y": 4 },
+      { "id": "sn-gate-east", "kind": "gate", "name": "东门", "x": 96, "y": 50 },
+      { "id": "sn-ring-s", "kind": "ring_road", "name": "南环道", "x": 50, "y": 12 },
+      { "id": "sn-ring-e", "kind": "ring_road", "name": "东环道", "x": 88, "y": 50 },
+      { "id": "sn-ring-n", "kind": "ring_road", "name": "北环道", "x": 50, "y": 88 },
+      { "id": "sn-ring-w", "kind": "ring_road", "name": "西环道", "x": 12, "y": 50 },
+      { "id": "sn-ring-c", "kind": "ring_road", "name": "中心路口", "x": 50, "y": 50 }
+    ],
+    "route_edges": [
+      { "from": "sn-gate-south", "to": "sn-ring-s", "bidirectional": true },
+      { "from": "sn-gate-east", "to": "sn-ring-e", "bidirectional": true },
+      { "from": "sn-ring-s", "to": "sn-ring-c", "bidirectional": true },
+      { "from": "sn-ring-e", "to": "sn-ring-c", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "sn-ring-c", "bidirectional": true },
+      { "from": "sn-ring-w", "to": "sn-ring-c", "bidirectional": true },
+      { "from": "sn-ring-s", "to": "sn-ring-e", "bidirectional": true },
+      { "from": "sn-ring-s", "to": "sn-ring-w", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "sn-ring-e", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "sn-ring-w", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "bn-bat-door-s", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "bn-bat-door-e", "bidirectional": true },
+      { "from": "sn-ring-e", "to": "bn-pt-door-w", "bidirectional": true },
+      { "from": "sn-ring-e", "to": "bn-pt-door-e", "bidirectional": true },
+      { "from": "sn-ring-s", "to": "bn-asm-door-n", "bidirectional": true },
+      { "from": "sn-ring-s", "to": "bn-asm-door-s", "bidirectional": true },
+      { "from": "sn-ring-w", "to": "bn-stp-door-e", "bidirectional": true },
+      { "from": "sn-ring-w", "to": "bn-stp-door-n", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "bn-wh-door-w", "bidirectional": true },
+      { "from": "sn-ring-n", "to": "bn-wh-door-e", "bidirectional": true }
+    ],
+    "site_facilities": [
+      { "id": "b-pumphouse", "kind": "building", "name": "消防泵房", "note": "厂区级独立设施，不隶属于任何车间", "route_node": "sn-ring-w", "x": 10, "y": 30 },
+      { "id": "res-fire-pool", "kind": "fire_resource", "name": "厂区消防水池", "route_node": "sn-ring-w", "x": 14, "y": 34 },
+      { "id": "res-ring-hydrant", "kind": "fire_resource", "name": "厂区环网消火栓", "route_node": "sn-ring-c", "x": 50, "y": 50 }
+    ]
+  },
+  "buildings": [
+    {
+      "id": "b-battery",
+      "name": "电池车间",
+      "workshop_id": "ws-battery",
+      "layout_profile": "multi_bay_process_line",
+      "data_scope": "workshop:ws-battery",
+      "route_node": "sn-ring-n",
+      "floors": [
+        {
+          "id": "f1",
+          "label": "1F",
+          "zones": [
+            { "id": "z-formation", "name": "电芯化成区", "kind": "process", "coords": { "x": 10, "y": 55, "w": 35, "h": 35 } },
+            { "id": "z-pack-a1", "name": "PACK 产线 A1", "kind": "process", "coords": { "x": 55, "y": 55, "w": 35, "h": 35 } },
+            { "id": "z-pack-a2", "name": "PACK 产线 A2", "kind": "process", "coords": { "x": 55, "y": 10, "w": 35, "h": 35 } },
+            { "id": "z-finished-cache", "name": "成品缓存区", "kind": "buffer", "coords": { "x": 10, "y": 10, "w": 35, "h": 35 } }
+          ]
+        },
+        {
+          "id": "f2",
+          "label": "2F",
+          "zones": [
+            { "id": "z-cell-test", "name": "电池测试间", "kind": "process", "coords": { "x": 10, "y": 55, "w": 35, "h": 35 } },
+            { "id": "z-module-cache", "name": "模组半成品缓存区", "kind": "buffer", "coords": { "x": 55, "y": 55, "w": 35, "h": 35 } }
+          ]
+        }
+      ],
+      "exterior_doors": [
+        { "id": "d-battery-south", "name": "车间南门", "node": "bn-bat-door-s" },
+        { "id": "d-battery-east", "name": "车间东门", "node": "bn-bat-door-e" }
+      ],
+      "stairs": [{ "id": "st-battery-1", "name": "疏散楼梯 1", "node_f1": "bn-bat-stair-f1", "node_f2": "bn-bat-stair-f2" }],
+      "interior_doors": [
+        { "id": "id-bat-formation", "name": "化成区防火门", "node": "bn-bat-idoor-formation", "zone": "z-formation" },
+        { "id": "id-bat-pack-a1", "name": "PACK A1 防火门", "node": "bn-bat-idoor-pack", "zone": "z-pack-a1" },
+        { "id": "id-bat-cache", "name": "缓存区防火门", "node": "bn-bat-idoor-cache", "zone": "z-module-cache" }
+      ],
+      "route_nodes": [
+        { "id": "bn-bat-door-s", "kind": "exterior_door", "name": "车间南门", "x": 50, "y": 2, "floor": "f1" },
+        { "id": "bn-bat-door-e", "kind": "exterior_door", "name": "车间东门", "x": 98, "y": 50, "floor": "f1" },
+        { "id": "bn-bat-hall-f1", "kind": "corridor", "name": "1F 主通道", "x": 50, "y": 50, "floor": "f1" },
+        { "id": "bn-bat-stair-f1", "kind": "stair", "name": "楼梯 1F 口", "x": 8, "y": 50, "floor": "f1" },
+        { "id": "bn-bat-stair-f2", "kind": "stair", "name": "楼梯 2F 口", "x": 8, "y": 50, "floor": "f2" },
+        { "id": "bn-bat-hall-f2", "kind": "corridor", "name": "2F 主通道", "x": 50, "y": 50, "floor": "f2" },
+        { "id": "bn-bat-idoor-formation", "kind": "interior_door", "name": "化成区防火门", "x": 28, "y": 52, "floor": "f1" },
+        { "id": "bn-bat-idoor-pack", "kind": "interior_door", "name": "PACK A1 防火门", "x": 72, "y": 52, "floor": "f1" },
+        { "id": "bn-bat-idoor-cache", "kind": "interior_door", "name": "缓存区防火门", "x": 72, "y": 52, "floor": "f2" }
+      ],
+      "route_edges": [
+        { "from": "bn-bat-door-s", "to": "bn-bat-hall-f1", "bidirectional": true },
+        { "from": "bn-bat-door-e", "to": "bn-bat-hall-f1", "bidirectional": true },
+        { "from": "bn-bat-hall-f1", "to": "bn-bat-stair-f1", "bidirectional": true },
+        { "from": "bn-bat-stair-f1", "to": "bn-bat-stair-f2", "bidirectional": false, "note": "疏散方向向上单向演示" },
+        { "from": "bn-bat-stair-f2", "to": "bn-bat-hall-f2", "bidirectional": true },
+        { "from": "bn-bat-hall-f1", "to": "bn-bat-idoor-formation", "bidirectional": true },
+        { "from": "bn-bat-hall-f1", "to": "bn-bat-idoor-pack", "bidirectional": true },
+        { "from": "bn-bat-hall-f2", "to": "bn-bat-idoor-cache", "bidirectional": true }
+      ],
+      "device_points": [
+        { "id": "pt-bat-smoke-01", "type": "smoke", "name": "2F 缓存区烟感", "zone": "z-module-cache", "x": 72, "y": 72, "floor": "f2" },
+        { "id": "pt-bat-temp-01", "type": "temperature", "name": "测试间温感", "zone": "z-cell-test", "x": 27, "y": 72, "floor": "f2" },
+        { "id": "pt-bat-hydrant-01", "type": "hydrant", "name": "1F 室内消火栓", "zone": "z-pack-a1", "x": 90, "y": 60, "floor": "f1" }
+      ],
+      "hazards": [
+        { "id": "hz-bat-01", "name": "锂电池模组半成品复燃风险", "zone": "z-module-cache" },
+        { "id": "hz-bat-02", "name": "化成区电解液可燃液体", "zone": "z-formation" }
+      ],
+      "fire_resources": [
+        { "id": "fr-bat-01", "type": "gas_suppression", "name": "电池测试间气体灭火系统", "zone": "z-cell-test" },
+        { "id": "fr-bat-02", "type": "extinguisher_special", "name": "锂电专用灭火器材点", "zone": "z-module-cache" }
+      ]
+    },
+    {
+      "id": "b-painting",
+      "name": "涂装车间",
+      "workshop_id": "ws-painting",
+      "layout_profile": "linear_booth_line",
+      "data_scope": "workshop:ws-painting",
+      "route_node": "sn-ring-e",
+      "floors": [
+        {
+          "id": "f1",
+          "label": "1F",
+          "zones": [
+            { "id": "z-pretreat", "name": "前处理区", "kind": "process", "coords": { "x": 5, "y": 30, "w": 18, "h": 40 } },
+            { "id": "z-booth-3", "name": "喷漆室 3#", "kind": "process", "coords": { "x": 30, "y": 30, "w": 20, "h": 40 } },
+            { "id": "z-oven", "name": "烘干炉区", "kind": "process", "coords": { "x": 57, "y": 30, "w": 18, "h": 40 } },
+            { "id": "z-paint-mix", "name": "调漆间", "kind": "hazard_room", "coords": { "x": 82, "y": 30, "w": 13, "h": 40 } }
+          ]
+        }
+      ],
+      "exterior_doors": [
+        { "id": "d-paint-west", "name": "车间西门", "node": "bn-pt-door-w" },
+        { "id": "d-paint-east", "name": "车间东门", "node": "bn-pt-door-e" }
+      ],
+      "stairs": [],
+      "interior_doors": [
+        { "id": "id-pt-booth-3", "name": "喷漆室 3# 防火门", "node": "bn-pt-idoor-booth", "zone": "z-booth-3" },
+        { "id": "id-pt-paint-mix", "name": "调漆间防火门", "node": "bn-pt-idoor-mix", "zone": "z-paint-mix" }
+      ],
+      "route_nodes": [
+        { "id": "bn-pt-door-w", "kind": "exterior_door", "name": "车间西门", "x": 2, "y": 50, "floor": "f1" },
+        { "id": "bn-pt-door-e", "kind": "exterior_door", "name": "车间东门", "x": 98, "y": 50, "floor": "f1" },
+        { "id": "bn-pt-aisle", "kind": "corridor", "name": "产线参观通道", "x": 50, "y": 15, "floor": "f1" },
+        { "id": "bn-pt-idoor-booth", "kind": "interior_door", "name": "喷漆室 3# 防火门", "x": 40, "y": 28, "floor": "f1" },
+        { "id": "bn-pt-idoor-mix", "kind": "interior_door", "name": "调漆间防火门", "x": 88, "y": 28, "floor": "f1" }
+      ],
+      "route_edges": [
+        { "from": "bn-pt-door-w", "to": "bn-pt-aisle", "bidirectional": true },
+        { "from": "bn-pt-door-e", "to": "bn-pt-aisle", "bidirectional": true },
+        { "from": "bn-pt-aisle", "to": "bn-pt-idoor-booth", "bidirectional": true },
+        { "from": "bn-pt-aisle", "to": "bn-pt-idoor-mix", "bidirectional": true }
+      ],
+      "device_points": [
+        { "id": "pt-pt-smoke-01", "type": "smoke", "name": "喷漆室 3# 烟感", "zone": "z-booth-3", "x": 40, "y": 50, "floor": "f1" },
+        { "id": "pt-pt-gas-01", "type": "gas", "name": "调漆间可燃气体探测器", "zone": "z-paint-mix", "x": 88, "y": 50, "floor": "f1" },
+        { "id": "pt-pt-hydrant-01", "type": "hydrant", "name": "通道室内消火栓", "zone": "z-pretreat", "x": 12, "y": 20, "floor": "f1" }
+      ],
+      "hazards": [
+        { "id": "hz-pt-01", "name": "调漆间可燃液体", "zone": "z-paint-mix" },
+        { "id": "hz-pt-02", "name": "喷涂作业区粉尘与溶剂蒸气", "zone": "z-booth-3" }
+      ],
+      "fire_resources": [
+        { "id": "fr-pt-01", "type": "sprinkler", "name": "自动喷水灭火系统", "zone": "z-booth-3" },
+        { "id": "fr-pt-02", "type": "gas_suppression", "name": "调漆间气体灭火系统", "zone": "z-paint-mix" }
+      ]
+    },
+    {
+      "id": "b-assembly",
+      "name": "总装车间",
+      "workshop_id": "ws-assembly",
+      "layout_profile": "u_shaped_assembly",
+      "data_scope": "workshop:ws-assembly",
+      "route_node": "sn-ring-s",
+      "floors": [
+        {
+          "id": "f1",
+          "label": "1F",
+          "zones": [
+            { "id": "z-main-line", "name": "总装主线", "kind": "process", "coords": { "x": 15, "y": 55, "w": 70, "h": 18 } },
+            { "id": "z-sub-assembly", "name": "分装区", "kind": "process", "coords": { "x": 15, "y": 12, "w": 30, "h": 30 } },
+            { "id": "z-test-b2", "name": "测试区 B2", "kind": "process", "coords": { "x": 55, "y": 12, "w": 30, "h": 30 } },
+            { "id": "z-inspection-line", "name": "检测线", "kind": "process", "coords": { "x": 15, "y": 78, "w": 70, "h": 14 } }
+          ]
+        },
+        {
+          "id": "f2",
+          "label": "2F 办公夹层",
+          "zones": [
+            { "id": "z-office-mezz", "name": "办公夹层", "kind": "office", "coords": { "x": 60, "y": 60, "w": 30, "h": 30 } }
+          ]
+        }
+      ],
+      "exterior_doors": [
+        { "id": "d-asm-north", "name": "车间北门", "node": "bn-asm-door-n" },
+        { "id": "d-asm-south", "name": "车间南门", "node": "bn-asm-door-s" }
+      ],
+      "stairs": [{ "id": "st-asm-1", "name": "夹层楼梯", "node_f1": "bn-asm-stair-f1", "node_f2": "bn-asm-stair-f2" }],
+      "interior_doors": [
+        { "id": "id-asm-main", "name": "总装主线安全门", "node": "bn-asm-idoor-main", "zone": "z-main-line" },
+        { "id": "id-asm-test", "name": "测试区 B2 安全门", "node": "bn-asm-idoor-test", "zone": "z-test-b2" }
+      ],
+      "route_nodes": [
+        { "id": "bn-asm-door-n", "kind": "exterior_door", "name": "车间北门", "x": 50, "y": 98, "floor": "f1" },
+        { "id": "bn-asm-door-s", "kind": "exterior_door", "name": "车间南门", "x": 50, "y": 2, "floor": "f1" },
+        { "id": "bn-asm-hall", "kind": "corridor", "name": "U 型环廊", "x": 50, "y": 48, "floor": "f1" },
+        { "id": "bn-asm-stair-f1", "kind": "stair", "name": "夹层楼梯 1F 口", "x": 55, "y": 60, "floor": "f1" },
+        { "id": "bn-asm-stair-f2", "kind": "stair", "name": "夹层楼梯 2F 口", "x": 55, "y": 60, "floor": "f2" },
+        { "id": "bn-asm-idoor-main", "kind": "interior_door", "name": "总装主线安全门", "x": 50, "y": 55, "floor": "f1" },
+        { "id": "bn-asm-idoor-test", "kind": "interior_door", "name": "测试区 B2 安全门", "x": 70, "y": 45, "floor": "f1" }
+      ],
+      "route_edges": [
+        { "from": "bn-asm-door-n", "to": "bn-asm-hall", "bidirectional": true },
+        { "from": "bn-asm-door-s", "to": "bn-asm-hall", "bidirectional": true },
+        { "from": "bn-asm-hall", "to": "bn-asm-stair-f1", "bidirectional": true },
+        { "from": "bn-asm-stair-f1", "to": "bn-asm-stair-f2", "bidirectional": true },
+        { "from": "bn-asm-hall", "to": "bn-asm-idoor-main", "bidirectional": true },
+        { "from": "bn-asm-hall", "to": "bn-asm-idoor-test", "bidirectional": true }
+      ],
+      "device_points": [
+        { "id": "pt-asm-gas-01", "type": "gas", "name": "测试区 B2 气体探测器", "zone": "z-test-b2", "x": 70, "y": 27, "floor": "f1" },
+        { "id": "pt-asm-smoke-01", "type": "smoke", "name": "总装主线烟感", "zone": "z-main-line", "x": 50, "y": 64, "floor": "f1" },
+        { "id": "pt-asm-hydrant-01", "type": "hydrant", "name": "环廊室内消火栓", "zone": "z-sub-assembly", "x": 30, "y": 45, "floor": "f1" }
+      ],
+      "hazards": [
+        { "id": "hz-asm-01", "name": "测试区燃料加注与尾气", "zone": "z-test-b2" },
+        { "id": "hz-asm-02", "name": "分装区包装材料可燃物", "zone": "z-sub-assembly" }
+      ],
+      "fire_resources": [
+        { "id": "fr-asm-01", "type": "sprinkler", "name": "自动喷水灭火系统", "zone": "z-main-line" },
+        { "id": "fr-asm-02", "type": "extinguisher", "name": "环廊灭火器点", "zone": "z-main-line" }
+      ]
+    },
+    {
+      "id": "b-stamping",
+      "name": "冲压车间",
+      "workshop_id": "ws-stamping",
+      "layout_profile": "heavy_press_row",
+      "data_scope": "workshop:ws-stamping",
+      "route_node": "sn-ring-w",
+      "floors": [
+        {
+          "id": "f1",
+          "label": "1F",
+          "zones": [
+            { "id": "z-press-line-a", "name": "冲压线 A", "kind": "process", "coords": { "x": 10, "y": 55, "w": 80, "h": 20 } },
+            { "id": "z-die-store", "name": "模具存放区", "kind": "storage", "coords": { "x": 10, "y": 10, "w": 35, "h": 30 } },
+            { "id": "z-scrap", "name": "废料输送区", "kind": "process", "coords": { "x": 55, "y": 10, "w": 35, "h": 30 } },
+            { "id": "z-control-cabinet", "name": "冲压线控制柜区", "kind": "electrical", "coords": { "x": 82, "y": 60, "w": 12, "h": 25 } }
+          ]
+        }
+      ],
+      "exterior_doors": [
+        { "id": "d-stp-east", "name": "车间东门", "node": "bn-stp-door-e" },
+        { "id": "d-stp-north", "name": "车间北门", "node": "bn-stp-door-n" }
+      ],
+      "stairs": [],
+      "interior_doors": [
+        { "id": "id-stp-cabinet", "name": "控制柜区防火门", "node": "bn-stp-idoor-cabinet", "zone": "z-control-cabinet" }
+      ],
+      "route_nodes": [
+        { "id": "bn-stp-door-e", "kind": "exterior_door", "name": "车间东门", "x": 98, "y": 40, "floor": "f1" },
+        { "id": "bn-stp-door-n", "kind": "exterior_door", "name": "车间北门", "x": 50, "y": 98, "floor": "f1" },
+        { "id": "bn-stp-aisle", "kind": "corridor", "name": "冲压线安全通道", "x": 50, "y": 45, "floor": "f1" },
+        { "id": "bn-stp-idoor-cabinet", "kind": "interior_door", "name": "控制柜区防火门", "x": 85, "y": 50, "floor": "f1" }
+      ],
+      "route_edges": [
+        { "from": "bn-stp-door-e", "to": "bn-stp-aisle", "bidirectional": true },
+        { "from": "bn-stp-door-n", "to": "bn-stp-aisle", "bidirectional": true },
+        { "from": "bn-stp-aisle", "to": "bn-stp-idoor-cabinet", "bidirectional": true }
+      ],
+      "device_points": [
+        { "id": "pt-stp-smoke-01", "type": "smoke", "name": "控制柜区烟感", "zone": "z-control-cabinet", "x": 88, "y": 72, "floor": "f1" },
+        { "id": "pt-stp-temp-01", "type": "temperature", "name": "冲压线 A 温感", "zone": "z-press-line-a", "x": 50, "y": 65, "floor": "f1" },
+        { "id": "pt-stp-hydrant-01", "type": "hydrant", "name": "安全通道室内消火栓", "zone": "z-press-line-a", "x": 20, "y": 48, "floor": "f1" }
+      ],
+      "hazards": [
+        { "id": "hz-stp-01", "name": "控制柜电气火灾风险", "zone": "z-control-cabinet" },
+        { "id": "hz-stp-02", "name": "冲压油雾与润滑油脂", "zone": "z-press-line-a" }
+      ],
+      "fire_resources": [
+        { "id": "fr-stp-01", "type": "sprinkler", "name": "自动喷水灭火系统", "zone": "z-press-line-a" },
+        { "id": "fr-stp-02", "type": "extinguisher_co2", "name": "控制柜区二氧化碳灭火器", "zone": "z-control-cabinet" }
+      ]
+    },
+    {
+      "id": "b-warehouse",
+      "name": "立体仓库",
+      "workshop_id": "ws-warehouse",
+      "layout_profile": "high_rack_aisles",
+      "data_scope": "workshop:ws-warehouse",
+      "route_node": "sn-ring-n",
+      "floors": [
+        {
+          "id": "f1",
+          "label": "1F",
+          "zones": [
+            { "id": "z-inbound", "name": "入库区", "kind": "logistics", "coords": { "x": 5, "y": 60, "w": 20, "h": 30 } },
+            { "id": "z-stacker-aisle", "name": "堆垛机通道", "kind": "process", "coords": { "x": 30, "y": 20, "w": 15, "h": 70 } },
+            { "id": "z-raw-store", "name": "原料仓区", "kind": "storage", "note": "全厂原料集中存放点，其他车间不再设原料仓库", "coords": { "x": 50, "y": 55, "w": 22, "h": 35 } },
+            { "id": "z-finished-store", "name": "成品存储区", "kind": "storage", "coords": { "x": 50, "y": 12, "w": 22, "h": 35 } },
+            { "id": "z-outbound", "name": "出库区", "kind": "logistics", "coords": { "x": 78, "y": 20, "w": 17, "h": 30 } }
+          ]
+        }
+      ],
+      "exterior_doors": [
+        { "id": "d-wh-west", "name": "入库月台门", "node": "bn-wh-door-w" },
+        { "id": "d-wh-east", "name": "出库月台门", "node": "bn-wh-door-e" }
+      ],
+      "stairs": [],
+      "interior_doors": [
+        { "id": "id-wh-raw", "name": "原料仓区防火门", "node": "bn-wh-idoor-raw", "zone": "z-raw-store" },
+        { "id": "id-wh-stacker", "name": "堆垛机通道安全门", "node": "bn-wh-idoor-stacker", "zone": "z-stacker-aisle" },
+        { "id": "id-wh-finished", "name": "成品存储区防火门", "node": "bn-wh-idoor-finished", "zone": "z-finished-store" }
+      ],
+      "route_nodes": [
+        { "id": "bn-wh-door-w", "kind": "exterior_door", "name": "入库月台门", "x": 2, "y": 75, "floor": "f1" },
+        { "id": "bn-wh-door-e", "kind": "exterior_door", "name": "出库月台门", "x": 98, "y": 35, "floor": "f1" },
+        { "id": "bn-wh-aisle", "kind": "corridor", "name": "消防通道", "x": 45, "y": 50, "floor": "f1" },
+        { "id": "bn-wh-idoor-raw", "kind": "interior_door", "name": "原料仓区防火门", "x": 48, "y": 70, "floor": "f1" },
+        { "id": "bn-wh-idoor-stacker", "kind": "interior_door", "name": "堆垛机通道安全门", "x": 37, "y": 45, "floor": "f1" },
+        { "id": "bn-wh-idoor-finished", "kind": "interior_door", "name": "成品存储区防火门", "x": 48, "y": 30, "floor": "f1" }
+      ],
+      "route_edges": [
+        { "from": "bn-wh-door-w", "to": "bn-wh-aisle", "bidirectional": true },
+        { "from": "bn-wh-door-e", "to": "bn-wh-aisle", "bidirectional": true },
+        { "from": "bn-wh-aisle", "to": "bn-wh-idoor-raw", "bidirectional": true },
+        { "from": "bn-wh-aisle", "to": "bn-wh-idoor-stacker", "bidirectional": true },
+        { "from": "bn-wh-aisle", "to": "bn-wh-idoor-finished", "bidirectional": true }
+      ],
+      "device_points": [
+        { "id": "pt-wh-smoke-01", "type": "smoke", "name": "堆垛机通道烟感", "zone": "z-stacker-aisle", "x": 37, "y": 55, "floor": "f1" },
+        { "id": "pt-wh-smoke-02", "type": "smoke", "name": "原料仓区烟感", "zone": "z-raw-store", "x": 61, "y": 72, "floor": "f1" },
+        { "id": "pt-wh-hydrant-01", "type": "hydrant", "name": "消防通道室内消火栓", "zone": "z-inbound", "x": 25, "y": 50, "floor": "f1" }
+      ],
+      "hazards": [
+        { "id": "hz-wh-01", "name": "高位货架可燃包装密集存储", "zone": "z-finished-store" },
+        { "id": "hz-wh-02", "name": "堆垛机电气驱动系统", "zone": "z-stacker-aisle" }
+      ],
+      "fire_resources": [
+        { "id": "fr-wh-01", "type": "sprinkler", "name": "货架内自动喷水灭火系统", "zone": "z-raw-store" },
+        { "id": "fr-wh-02", "type": "extinguisher", "name": "月台灭火器点", "zone": "z-outbound" }
+      ]
+    }
+  ]
+}
