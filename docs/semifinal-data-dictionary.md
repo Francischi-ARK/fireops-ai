@@ -11,6 +11,7 @@
 | `scenarios/fire-confirmed.json` | 真实火警全流程演示夹具（接警到归档） |
 | `scenarios/false-alarm-maintenance.json` | 误报转维保工单闭环演示夹具 |
 | `scenarios/inspection-rectification.json` | 巡查隐患整改闭环演示夹具 |
+| `legacy_map.json` | 旧 CSV（企业、点位、事件）到空间模型的对接映射，按位置关键词归到工艺区、楼层或外门 |
 
 ## ID 命名规则
 

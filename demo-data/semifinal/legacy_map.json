@@ -1,0 +1,42 @@
+{
+  "schema": "fireops-semifinal/legacy-map/v1",
+  "is_simulation": true,
+  "external_system": "none",
+  "purpose": "把 demo-data 旧 CSV 的企业、点位和事件对接到复赛空间模型；只做映射，不复制业务记录。",
+  "enterprises": {
+    "ent-001": { "building_id": "b-battery", "workshop_id": "ws-battery", "label": "电池车间（PACK/化成）" },
+    "ent-002": { "building_id": "b-assembly", "workshop_id": "ws-assembly", "label": "总装车间" },
+    "ent-003": { "building_id": "b-warehouse", "workshop_id": "ws-warehouse", "label": "立体仓库" },
+    "ent-004": { "building_id": "b-stamping", "workshop_id": "ws-stamping", "label": "冲压车间" },
+    "ent-005": { "building_id": "b-painting", "workshop_id": "ws-painting", "label": "涂装车间" }
+  },
+  "location_rules": {
+    "ent-001": [
+      { "match": "电池测试间", "zone": "z-cell-test", "floor": "f2" },
+      { "match": "PACK", "zone": "z-pack-a1", "floor": "f1" },
+      { "match": "化成区", "zone": "z-formation", "floor": "f1" },
+      { "match": "南门", "door": "d-battery-south", "floor": "f1" }
+    ],
+    "ent-002": [
+      { "match": "主线", "zone": "z-main-line", "floor": "f1" },
+      { "match": "测试区", "zone": "z-test-b2", "floor": "f1" },
+      { "match": "北门", "door": "d-asm-north", "floor": "f1" }
+    ],
+    "ent-003": [
+      { "match": "入口", "door": "d-wh-west", "floor": "f1" },
+      { "match": "吸气感烟", "zone": "z-stacker-aisle", "floor": "f1" }
+    ],
+    "ent-004": [
+      { "match": "冲压车间", "zone": "z-press-line-a", "floor": "f1" }
+    ],
+    "ent-005": [
+      { "match": "调漆间", "zone": "z-paint-mix", "floor": "f1" },
+      { "match": "喷涂线", "zone": "z-booth-3", "floor": "f1" },
+      { "match": "烘干室", "zone": "z-oven", "floor": "f1" },
+      { "match": "消防通道", "zone": "z-pretreat", "floor": "f1", "note": "PT1 层消防通道邻近前处理区" },
+      { "match": "东出口", "door": "d-paint-east", "floor": "f1" },
+      { "match": "变电所", "zone": "z-pretreat", "floor": "f1", "note": "合成模型未单列变电所，归入前处理区一侧" },
+      { "match": "空调机房", "zone": "z-oven", "floor": "f1", "note": "合成模型未单列空调机房，归入烘干炉区一侧" }
+    ]
+  }
+}

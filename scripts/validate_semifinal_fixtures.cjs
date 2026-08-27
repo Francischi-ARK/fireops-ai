@@ -11,6 +11,8 @@ const FILES = {
     "demo-data/semifinal/scenarios/false-alarm-maintenance.json",
     "demo-data/semifinal/scenarios/inspection-rectification.json",
   ],
+  legacyMap: "demo-data/semifinal/legacy_map.json",
+  legacyEnterprises: "demo-data/enterprises.csv",
 };
 const errors = [];
 const fail = (file, field, reason) => errors.push({ file, field, reason });
@@ -26,13 +28,14 @@ const readJson = (rel) => {
 const rolesDoc = readJson(FILES.roles);
 const spatial = readJson(FILES.spatial);
 const scenarios = FILES.scenarios.map((rel) => ({ rel, doc: readJson(rel) }));
-if (rolesDoc && spatial && scenarios.every((s) => s.doc)) {
+const legacyMap = readJson(FILES.legacyMap);
+if (rolesDoc && spatial && scenarios.every((s) => s.doc) && legacyMap) {
   main();
 }
 report();
 function main() {
   // 检查 9：合成标记与外部系统边界
-  const allDocs = [[FILES.roles, rolesDoc], [FILES.spatial, spatial], ...scenarios.map((s) => [s.rel, s.doc])];
+  const allDocs = [[FILES.roles, rolesDoc], [FILES.spatial, spatial], [FILES.legacyMap, legacyMap], ...scenarios.map((s) => [s.rel, s.doc])];
   for (const [rel, doc] of allDocs) {
     if (doc.is_simulation !== true) fail(rel, "is_simulation", "必须为 true");
     if (doc.external_system !== "none") fail(rel, "external_system", '必须为 "none"');
@@ -160,6 +163,26 @@ function main() {
     if (topoSigs.has(sig)) fail(FILES.spatial, b.id, "路线拓扑与 " + topoSigs.get(sig) + " 重复");
     topoSigs.set(sig, b.id);
   }
+  // 旧数据映射：企业齐备、目标存在、归属一致
+  const csvText = fs.readFileSync(path.join(ROOT, FILES.legacyEnterprises), "utf8");
+  const csvEntIds = csvText.trim().split("\n").slice(1).map((line) => line.split(",")[0]).filter(Boolean);
+  for (const entId of csvEntIds) {
+    if (!legacyMap.enterprises || !legacyMap.enterprises[entId]) fail(FILES.legacyMap, entId, "enterprises.csv 中的企业缺少映射");
+  }
+  for (const [entId, m] of Object.entries(legacyMap.enterprises || {})) {
+    if (!spatialIds.has(m.building_id)) fail(FILES.legacyMap, entId + ".building_id", "建筑不存在 " + m.building_id);
+    if (!workshopIds.has(m.workshop_id)) fail(FILES.legacyMap, entId + ".workshop_id", "车间不存在 " + m.workshop_id);
+  }
+  for (const [entId, rules] of Object.entries(legacyMap.location_rules || {})) {
+    const m = (legacyMap.enterprises || {})[entId];
+    if (!m) { fail(FILES.legacyMap, entId, "location_rules 引用了未映射的企业"); continue; }
+    for (const rule of rules) {
+      const target = rule.zone || rule.door;
+      if (!spatialIds.has(target)) fail(FILES.legacyMap, entId + " match=" + rule.match, "目标不存在 " + target);
+      const owner = buildingScopedOwner.get(target) || (rule.door && (buildings.find((b) => (b.exterior_doors || []).some((d) => d.id === rule.door)) || {}).id);
+      if (owner && owner !== m.building_id) fail(FILES.legacyMap, entId + " match=" + rule.match, "目标 " + target + " 属于 " + owner + "，与映射建筑 " + m.building_id + " 不一致");
+    }
+  }
   // 场景校验
   const BANNED_ACTIONS = ["auto_call_119", "auto_start_suppression", "auto_operate_device", "ai_confirm_fire"];
   const ALLOWED_TRANSITIONS = new Set([
@@ -249,7 +272,7 @@ function report() {
   }
   const stats = globalThis.__stats || { totalSteps: 0 };
   console.log("校验通过：");
-  console.log("- 数据文件: 5 (角色 1 / 空间 1 / 场景 3)");
+  console.log("- 数据文件: 6 (角色 1 / 空间 1 / 映射 1 / 场景 3)");
   console.log("- 角色数量: " + (rolesDoc ? rolesDoc.roles.length : 0));
   console.log("- 建筑数量: " + (spatial ? spatial.buildings.length : 0) + " (+厂区级设施 " + (spatial ? spatial.site.site_facilities.length : 0) + ")");
   console.log("- 场景步骤: " + stats.totalSteps);
